@@ -113,7 +113,8 @@ def ensure_plotly_chrome(verbose=False) -> bool:
             continue
     return False
 
-    def _to_bytes(uploaded_file):
+
+def _to_bytes(uploaded_file):
         if not uploaded_file:
             return None
         try:
@@ -869,45 +870,37 @@ if st.button("🔎 Analyser"):
         fig_ports = plot_portfolios_cum(port_returns, f"Performance cumulée des portefeuilles ({rebal_mode})")
         st.plotly_chart(fig_ports, use_container_width=True)
 
-        # ---------------- Export Excel & PDF --------------------------
-st.subheader("📥 Exporter les résultats")
+            # ---------------- Export Excel & PDF --------------------------
+        st.subheader("📥 Exporter les résultats")
 
-# On prépare tout ce qu'il faut pour exporter, et on le persiste.
-perf_pct = (df_graph.ffill().bfill()/df_graph.ffill().bfill().iloc[0]-1)*100
+        # On prépare tout ce qu'il faut pour exporter, et on le persiste.
+        perf_pct = (df_graph.ffill().bfill()/df_graph.ffill().bfill().iloc[0]-1)*100
 
-charts_for_pdf = {
-    "Matrice de corrélation": fig_heat,
-    "Performances cumulées": fig_perf,
-    "Évolution (base 100)": fig_lines,
-    "Perf relative vs benchmark": fig_rel,
-    "Portefeuilles (base 100)": fig_ports,
-}
-# Composition en texte simple pour PDF (sans HTML)
-comp_plain = []
-for line in comp_lines:
-    p = Paragraph(line.replace("<b>","").replace("</b>",""), getSampleStyleSheet()["BodyText"])
-    comp_plain.append(p.getPlainText())
+        charts_for_pdf = {
+            "Matrice de corrélation": fig_heat,
+            "Performances cumulées": fig_perf,
+            "Évolution (base 100)": fig_lines,
+            "Perf relative vs benchmark": fig_rel,
+            "Portefeuilles (base 100)": fig_ports,
+        }
+        # Composition en texte simple pour PDF (sans HTML)
+        comp_plain = []
+        for line in comp_lines:
+            p = Paragraph(line.replace("<b>","").replace("</b>",""), getSampleStyleSheet()["BodyText"])
+            comp_plain.append(p.getPlainText())
  
-def _to_bytes(uploaded_file):
-        if not uploaded_file:
-            return None
-        try:
-            uploaded_file.seek(0)
-        except Exception:
-            pass
-        return uploaded_file.read()
-    
-st.session_state["export_payload"] = {
-    "df_graph": df_graph,                       # prix des tickers choisis (index date)
-    "perf_pct": perf_pct,                       # perfs cumulées en %
-    "metrics_df": metrics_df,                   # tableau des métriques
-    "gaps": gaps,                               # contrôle qualité data
-    "charts_for_pdf": charts_for_pdf,           # figures Plotly
-    "comp_lines_plain": comp_plain,             # compositions en texte simple
-    "company_name": company_name,
-    "logo_bytes": _to_bytes(logo_file),         # bytes du logo (optionnel)
-}
-st.success("Résultats prêts pour export (Excel / PDF) dans la section en bas de page.")
+
+        st.session_state["export_payload"] = {
+            "df_graph": df_graph,                       # prix des tickers choisis (index date)
+            "perf_pct": perf_pct,                       # perfs cumulées en %
+            "metrics_df": metrics_df,                   # tableau des métriques
+            "gaps": gaps,                               # contrôle qualité data
+            "charts_for_pdf": charts_for_pdf,           # figures Plotly
+            "comp_lines_plain": comp_plain,             # compositions en texte simple
+            "company_name": company_name,
+            "logo_bytes": _to_bytes(logo_file),         # bytes du logo (optionnel)
+        }
+        st.success("Résultats prêts pour export (Excel / PDF) dans la section en bas de page.")
 
 
         if "US 10Y Yield" in selected_comparisons or benchmark_label == "US 10Y Yield":
