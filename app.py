@@ -1044,7 +1044,7 @@ if st.button("🔎 Analyser"):
         # Nettoie les éventuels None (si un builder MPL avait échoué)
         charts_for_pdf = {k: v for k, v in charts_for_pdf.items() if v is not None}
 
-        # Composition en texte simple pour PDF (sans HTML)
+        # Composition en texte simple pour PDF/DOCX (sans HTML)
         comp_plain = []
         for line in comp_lines:
             p = Paragraph(line.replace("<b>","").replace("</b>",""), getSampleStyleSheet()["BodyText"])
@@ -1055,12 +1055,12 @@ if st.button("🔎 Analyser"):
             "perf_pct": perf_pct,
             "metrics_df": metrics_df,
             "gaps": gaps,
-            "charts_for_pdf": charts_for_pdf,   # <<< maintenant ce sont des PNG bytes (ou Plotly converti)
+            "charts_for_pdf": charts_for_pdf,   # dict: name -> PNG bytes
             "comp_lines_plain": comp_plain,
             "company_name": company_name,
             "logo_bytes": _to_bytes(logo_file),
         }
-        st.success("✅ Résultats prêts pour export (Excel / PDF) dans la section en bas de page.")
+        st.success("Résultats prêts pour export dans la section en bas de page.")
 
         if "US 10Y Yield" in selected_comparisons or benchmark_label == "US 10Y Yield":
             st.info("ℹ️ 'US 10Y Yield' (^TNX) est un rendement (pas un prix). Interpréter les comparaisons avec prudence.")
@@ -1104,31 +1104,45 @@ if "export_payload" in st.session_state:
     except Exception as e_xlsx:
         st.warning(f"Export Excel indisponible : {e_xlsx}")
 
-    # --- PDF ---
-    if include_pdf:
-        colA, colB = st.columns([1,2])
-        with colA:
-            gen_pdf = st.button("🖼️ Générer le rapport PDF", key="gen_pdf_btn")
-        if gen_pdf:
-            try:
-                logo_io = io.BytesIO(payload["logo_bytes"]) if payload["logo_bytes"] else None
-                pdf_buf = generate_pdf_report(
-                    payload["company_name"],
-                    logo_io,
-                    payload["charts_for_pdf"],
-                    payload["metrics_df"],
-                    composition_lines=payload["comp_lines_plain"]
-                )
-                st.session_state["pdf_bytes"] = pdf_buf.getvalue()
-                st.success("Rapport PDF généré ✅")
-            except Exception as e_pdf:
-                st.error("Échec de génération du PDF.")
-                st.code(str(e_pdf))
+    # --- Rapports (PDF + DOCX) ---
+    gen_both = st.button("🖨️ Générer le rapport", key="gen_both")
+    if gen_both:
+        logo_io = io.BytesIO(payload["logo_bytes"]) if payload["logo_bytes"] else None
 
-        if "pdf_bytes" in st.session_state:
-            st.download_button("⬇️ Télécharger le rapport PDF",
-                               data=st.session_state["pdf_bytes"],
-                               file_name="rapport_portefeuille.pdf",
-                               mime="application/pdf")
-    else:
-        st.info("La génération PDF est désactivée (case décochée dans la barre latérale).")
+        # PDF
+        try:
+            pdf_buf = generate_pdf_report(
+                payload["company_name"],
+                logo_io,
+                payload["charts_for_pdf"],  # dict de PNG bytes
+                payload["metrics_df"],
+                composition_lines=payload["comp_lines_plain"]
+            )
+            st.session_state["pdf_bytes"] = pdf_buf.getvalue()
+        except Exception as e:
+            st.error(f"PDF: génération impossible — {e}")
+
+        # DOCX
+        try:
+            docx_buf = generate_docx_report(
+                payload["company_name"],
+                payload["logo_bytes"],
+                payload["charts_for_pdf"],  # dict de PNG bytes
+                payload["metrics_df"],
+                composition_lines=payload["comp_lines_plain"]
+            )
+            st.session_state["docx_bytes"] = docx_buf.getvalue()
+        except Exception as e:
+            st.error(f"Word: génération impossible — {e}")
+
+    if "docx_bytes" in st.session_state:
+        st.download_button("📝 Télécharger le rapport en Word",
+                           data=st.session_state["docx_bytes"],
+                           file_name="rapport_portefeuille.docx",
+                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+
+    if "pdf_bytes" in st.session_state:
+        st.download_button("⬇️ Télécharger le rapport en PDF",
+                           data=st.session_state["pdf_bytes"],
+                           file_name="rapport_portefeuille.pdf",
+                           mime="application/pdf")
