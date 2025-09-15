@@ -1,10 +1,12 @@
-# Core-Satellite-Crypto-Performance — v3 (patch)
+# Core-Satellite-Crypto-Performance — v3
 # ----------------------------------------------------------------------------------------
-# Changements appliqués:
-# - VS benchmark = poche crypto SEULE (pondérée) vs benchmark (un seul tracé)
-# - Ajout tickers crypto statiques demandés (si Yahoo les expose)
-# - Indicateurs de risque marqués d’un * + glossaire en bas de page
-# - Rapport PDF : graphiques de performance inclus, tableau de métriques avec retour à la ligne
+# Nouveautés vs v2 :
+# - Benchmark dédié (sélecteur) + graphique de performance relative
+# - Crypto list dynamique (CoinGecko, mcap>200M) + validation Yahoo + fallback statique
+# - Composition des portefeuilles affichée (ex: 60/40 ; 60/40 + X% crypto)
+# - Max Drawdown remis sous la volatilité dans le tableau comparatif
+# - Rapport PDF amélioré : logo non déformé (ratio), tableau plus propre, + graph "3 portefeuilles"
+# - Graphs Plotly conservés (heatmap, barres, base 100) + relative vs benchmark
 
 import streamlit as st
 import yfinance as yf
@@ -19,7 +21,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.units import cm
 from reportlab.platypus import Table, TableStyle, Paragraph, SimpleDocTemplate, Image as RLImage, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import getSampleStyleSheet
 from PIL import Image as PILImage
 
 # --------------------------------------------------------------------
@@ -40,8 +42,7 @@ asset_mapping = {
     "Gold": "GC=F",
     "iShares Bonds Agregate": "AGGG.L",
 }
-
-# Liste crypto statique (fallback si API indispo) — enrichie
+# Liste crypto statique (fallback si API indispo)
 crypto_static = {
     "Bitcoin (BTC$)": "BTC-USD",
     "Ethereum (ETH$)": "ETH-USD",
@@ -52,7 +53,7 @@ crypto_static = {
     "Dogecoin (DOGE)": "DOGE-USD",
     "Polygon (MATIC)": "MATIC-USD",
     "TRON (TRX)": "TRX-USD",
-    "Toncoin (TON)": "TON11419-USD",     # selon régions
+    "Toncoin (TON)": "TON11419-USD",  # peut être indispo sur Yahoo selon régions
     "Polkadot (DOT)": "DOT-USD",
     "Litecoin (LTC)": "LTC-USD",
     "Bitcoin Cash (BCH)": "BCH-USD",
@@ -80,22 +81,20 @@ crypto_static = {
     "Synthetix (SNX)": "SNX-USD",
     "The Graph (GRT)": "GRT-USD",
     "Fetch.AI (FET)": "FET-USD",
-    # ➕ Nouveaux demandés
-    "Hyperliquid (HYPE)": "HYPE32196-USD",
-    "Bittensor (TAO)": "TAO22974-USD",
-    "Shiba Inu (SHIB)": "SHIB-USD",
-    "Mantle (MNT)": "MNT-USD",
-    "PEPE (PEPE)": "PEPE-USD",
-    "Ondo (ONDO)": "ONDO-USD",
-    "Stacks (STX)": "STX-USD",
-    "Chiliz (CHZ)": "CHZ-USD",
-    "Raydium (RAY)": "RAY-USD",
-    "dogwifhat (WIF)": "WIF-USD",
-    "Theta (THETA)": "THETA-USD",
-    "Tezos (XTZ)": "XTZ-USD",
-    "Morpho (MORPHO)": "MORPHO-USD",    # peut être absent sur Yahoo
+    "Hyperliquid (HYPE)": "HYPE32196-USD", 
+    "Bittensor (TAO)": "TAO22974-USD", 
+    "Shiba Inu (SHIB)": "SHIB-USD", 
+    "Mantle (MNT)": "MNT-USD", 
+    "PEPE (PEPE)": "PEPE-USD", 
+    "Ondo (ONDO)": "ONDO-USD", 
+    "Stacks (STX)": "STX-USD", 
+    "Chiliz (CHZ)": "CHZ-USD", 
+    "Raydium (RAY)": "RAY-USD", 
+    "dogwifhat (WIF)": "WIF-USD", 
+    "Theta (THETA)": "THETA-USD", 
+    "Tezos (XTZ)": "XTZ-USD", 
+    "Morpho (MORPHO)": "MORPHO-USD",
 }
-
 us_equity_mapping = {
     "Apple (AAPL)": "AAPL",
     "Microsoft (MSFT)": "MSFT",
@@ -206,6 +205,7 @@ def portfolio_returns_with_rebalancing(prices, allocations, freq="M"):
     R = P.pct_change().dropna(how="all")
     keys = R.index.to_period("M" if freq=="M" else "Q")
     parts = []
+    w_full = np.array([alloc_norm[c] for c in tickers], dtype=float)
     for _, g in R.groupby(keys):
         cols = [c for c in g.columns if c in alloc_norm]
         if not cols: continue
@@ -257,17 +257,16 @@ def compute_metrics_from_returns(r, dpy=252, rf_annual=0.0,
             if want_cvar:
                 tail = losses[losses >= q]
                 cvar_val = tail.mean() if len(tail) > 0 else q
-    # libellés avec *
     return {
         "Annualized Return %": round(ann_ret*100, 2),
         "Cumulative Return %": round(cum_ret*100, 2),
-        "Volatility* (%)": round(vol*100, 2),
-        "Max Drawdown* (%)": round(max_dd*100, 2) if pd.notna(max_dd) else np.nan,
-        "Sharpe*": round(sharpe, 2),
-        "Sortino*": round(sortino, 2) if pd.notna(sortino) else np.nan,
-        "Calmar*": round(calmar, 2) if pd.notna(calmar) else np.nan,
-        "VaR* (daily)": round(var_val*100, 2) if pd.notna(var_val) else np.nan,
-        "CVaR* (daily)": round(cvar_val*100, 2) if pd.notna(cvar_val) else np.nan,
+        "Volatility %": round(vol*100, 2),
+        "Max Drawdown %": round(max_dd*100, 2) if pd.notna(max_dd) else np.nan,
+        "Sharpe": round(sharpe, 2),
+        "Sortino": round(sortino, 2) if pd.notna(sortino) else np.nan,
+        "Calmar": round(calmar, 2) if pd.notna(calmar) else np.nan,
+        "VaR (daily)": round(var_val*100, 2) if pd.notna(var_val) else np.nan,
+        "CVaR (daily)": round(cvar_val*100, 2) if pd.notna(cvar_val) else np.nan,
     }
 
 # ------------------ Plotly charts ------------------------------------
@@ -304,32 +303,17 @@ def plot_heatmap_corr(df_prices, names_map, title):
     fig.update_layout(title=title, margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
     return fig
 
-# === NOUVEAU : poche crypto SEULE vs benchmark (un seul tracé)
-def plot_crypto_pocket_vs_benchmark(df_all, crypto_allocation, crypto_mapping, benchmark_ticker, title):
-    # Prépare les colonnes de poche existantes
-    pocket_cols = [crypto_mapping[n] for (n, _) in crypto_allocation if crypto_mapping[n] in df_all.columns]
-    if (len(pocket_cols) == 0) or (benchmark_ticker not in df_all.columns):
-        return go.Figure()
-    # Poids normalisés
-    name_to_pct = {crypto_mapping[n]: pct for (n, pct) in crypto_allocation}
-    w = np.array([name_to_pct[c] for c in pocket_cols], dtype=float)
-    if w.sum() == 0: w = np.ones(len(pocket_cols))/len(pocket_cols)
-    else: w = w / w.sum()
-
+def plot_relative_vs_benchmark(df_all, benchmark_ticker, names_map, title):
     df = df_all.ffill().bfill()
-    # Rendements
-    pocket_rets = df[pocket_cols].pct_change().dropna(how="all")
-    bench_rets = df[benchmark_ticker].pct_change().dropna()
-    # Index commun
-    idx = pocket_rets.index.intersection(bench_rets.index)
-    pocket_cum = (1 + (pocket_rets[pocket_cols] * w).sum(axis=1).loc[idx]).cumprod()
-    bench_cum  = (1 + bench_rets.loc[idx]).cumprod()
-    rel = (pocket_cum/bench_cum - 1.0)*100
-
+    if benchmark_ticker not in df.columns:
+        return go.Figure()
+    bench = (df[benchmark_ticker]/df[benchmark_ticker].iloc[0])
+    rel = (df.divide(bench, axis=0) - 1.0) * 100  # en %
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=rel.index, y=rel, mode='lines',
-                             name="Poche crypto (pondérée) vs Benchmark"))
-    fig.update_layout(title=title, xaxis_title="", yaxis_title="Sur-/sous-performance (%)",
+    for col in [c for c in df.columns if c != benchmark_ticker]:
+        fig.add_trace(go.Scatter(x=rel.index, y=rel[col], mode='lines',
+                                 name=names_map.get(col, col)))
+    fig.update_layout(title=title, xaxis_title="", yaxis_title="Sur/ss perf vs benchmark (%)",
                       legend=dict(orientation="h", y=-0.2),
                       margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
     return fig
@@ -364,15 +348,10 @@ def keep_aspect_image(file_like, target_width_cm):
 
 def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, composition_lines):
     buffer = io.BytesIO()
-    styles = getSampleStyleSheet()
-    # Style avec word-wrap
-    cell_style = ParagraphStyle(
-        "Cell", parent=styles["BodyText"], fontSize=9, leading=11, wordWrap="CJK"
-    )
-
     doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm,
                             topMargin=1.2*cm, bottomMargin=1.2*cm)
     elements = []
+    styles = getSampleStyleSheet()
     title_style = styles["Title"]
     h2 = styles["Heading2"]
     normal = styles["BodyText"]
@@ -396,7 +375,7 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
             elements.append(Paragraph(line, normal))
         elements.append(Spacer(1, 0.2*cm))
 
-    # Charts (tous ceux fournis)
+    # Charts
     for name, fig in charts_dict.items():
         try:
             png = fig_to_png_bytes(fig, scale=2)
@@ -406,13 +385,15 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
         except Exception:
             continue
 
-    # Metrics table avec Paragraph (wrap auto)
+    # Metrics table (plus clean)
     if metrics_df is not None and not metrics_df.empty:
         elements.append(Paragraph("Portfolio Metrics", h2))
+        # formater
         df = metrics_df.copy()
-        data = [[Paragraph("Metric", cell_style)] + [Paragraph(str(c), cell_style) for c in df.columns]]
+        # construire data = header + rows
+        data = [["Metric"] + df.columns.tolist()]
         for idx, row in df.iterrows():
-            data.append([Paragraph(str(idx), cell_style)] + [Paragraph("" if pd.isna(v) else str(v), cell_style) for v in row.values])
+            data.append([idx] + [("" if pd.isna(v) else str(v)) for v in row.values])
         table = Table(data, repeatRows=1, colWidths=[5*cm] + [3.0*cm]*len(df.columns))
         table.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(-1,0), rl_colors.HexColor(PRIMARY)),
@@ -470,13 +451,17 @@ def build_crypto_mapping_dynamic(min_mcap_usd=2e8, pages=4):
             name = it.get("name","").strip()
             sym = (it.get("symbol","") or "").upper()
             if not sym: continue
+            # candidat Yahoo
             y_ticker = f"{sym}-USD"
+            # Quick validate (limité)
             try:
                 hist = yf.Ticker(y_ticker).history(period="5d")
                 if hist is None or hist.empty: continue
                 out[f"{name} ({sym})"] = y_ticker
             except Exception:
                 continue
+    # exceptions / corrections possibles
+    # (si besoin : corriger TON, TAO, ENA ... selon disponibilités Yahoo)
     return out
 
 st.markdown("## 💼 Composition du portefeuille crypto")
@@ -533,6 +518,8 @@ else:
 
 # ------------------ Sélections d'actifs & période --------------------
 available_assets = list(full_asset_mapping.keys())
+
+# >>> Benchmark (au lieu de "sélectionner un actif")
 benchmark_label = st.selectbox("📌 Sélectionnez le benchmark :", available_assets, index=available_assets.index("S&P 500") if "S&P 500" in available_assets else 0)
 benchmark_ticker = full_asset_mapping[benchmark_label]
 
@@ -548,7 +535,7 @@ with c2:
 
 # ------------------ Comparaison d'actifs -----------------------------
 st.markdown("**Liste des actifs à comparer**")
-compare_assets = [a for a in available_assets]
+compare_assets = [a for a in available_assets]  # on compare tout ce que l'utilisateur choisit
 preselect = ["Bitcoin (BTC$)","Ethereum (ETH$)","MSCI World","Nasdaq","S&P 500","US 10Y Yield","Dollar Index","Gold"]
 safe_default = [a for a in preselect if a in compare_assets]
 selected_comparisons = st.multiselect("📊 Actifs à comparer :", compare_assets, default=safe_default)
@@ -561,9 +548,7 @@ if st.button("🔎 Analyser"):
         tickers_portefeuilles = set()
         for alloc in portfolio_allocations.values():
             tickers_portefeuilles.update(alloc.keys())
-        # ➕ inclure explicitement les tickers de la poche crypto
-        pocket_tick = [crypto_mapping[n] for (n, _) in crypto_allocation]
-        tickers_dl = sorted(set(tickers_graphiques + list(tickers_portefeuilles) + pocket_tick))
+        tickers_dl = sorted(set(tickers_graphiques + list(tickers_portefeuilles)))
 
         # Période
         if use_custom_period:
@@ -575,6 +560,7 @@ if st.button("🔎 Analyser"):
 
         # Data
         df = download_prices(tickers_dl, start_date, end_date)
+        # Remplissage limité aux actifs "traditionnels"
         traditional_tickers = [t for t in traditional_tickers_set if t in df.columns]
         if traditional_tickers:
             df[traditional_tickers] = df[traditional_tickers].ffill().bfill()
@@ -598,39 +584,33 @@ if st.button("🔎 Analyser"):
         fig_heat = plot_heatmap_corr(df_graph, asset_names_map, f"Matrice de corrélation {label_period}")
         fig_perf = plot_perf_bars(df_graph, asset_names_map, f"Performances cumulées {label_period}")
         fig_lines = plot_cumulative_lines(df_graph, asset_names_map, f"Évolution des actifs {label_period}")
-
-        # ➜ VS benchmark : POCKET CRYPTO SEULE
-        fig_rel = plot_crypto_pocket_vs_benchmark(
-            df, crypto_allocation, crypto_mapping, benchmark_ticker,
-            f"Poche crypto (pondérée) vs benchmark ({asset_names_map.get(benchmark_ticker, benchmark_ticker)}) {label_period}"
-        )
+        fig_rel = plot_relative_vs_benchmark(df_graph, benchmark_ticker, asset_names_map,
+                                             f"Sur-/sous-performance vs benchmark ({asset_names_map.get(benchmark_ticker, benchmark_ticker)}) {label_period}")
 
         st.plotly_chart(fig_heat, use_container_width=True)
         st.plotly_chart(fig_perf, use_container_width=True)
         st.plotly_chart(fig_lines, use_container_width=True)
         st.plotly_chart(fig_rel, use_container_width=True)
-        st.plotly_chart(fig_rel, use_container_width=True)
 
-          # ---------------- Portefeuilles & métriques -------------------
+        # ---------------- Portefeuilles & métriques -------------------
         rf_annual = risk_free_rate_percent / 100.0
         port_returns = {}
-        port_names_display = {
-            "Portfolio 1": portfolio1_label(),
-            "Portfolio 2": portfolio2_label(),
-        }
+        port_names_display = {}
+
+        # Noms jolis
+        port_names_display["Portfolio 1"] = portfolio1_label()
+        port_names_display["Portfolio 2"] = portfolio2_label()
+        # Portfolio 3 (avec % crypto)
         if "Portfolio 3" in portfolio_allocations:
             port_names_display["Portfolio 3"] = f"Portefeuille 3 (60/40 + {crypto_global_pct:.0f}% Crypto)"
 
-        # calcul des retours quotidiens selon le rebalancing choisi
+        # Calcul des retours quotidiens selon rebalancing
         for key, alloc in portfolio_allocations.items():
             r = portfolio_daily_returns(df, alloc, rebal_mode)
             port_returns[port_names_display.get(key, key)] = r
 
-        # sélection des mesures
-        def want(x: str) -> bool: 
-            return x in risk_measures
-
-        # métriques
+        # Metrics
+        def want(x): return x in risk_measures
         metrics_dict = {}
         for key, alloc in portfolio_allocations.items():
             disp = port_names_display.get(key, key)
@@ -638,51 +618,45 @@ if st.button("🔎 Analyser"):
             r = port_returns.get(disp, pd.Series(dtype=float))
             m = compute_metrics_from_returns(
                 r, dpy=dpy, rf_annual=rf_annual,
-                want_sortino=want("Sortino"),
-                want_calmar=want("Calmar"),
-                want_var=want("VaR (daily)"),
-                want_cvar=want("CVaR (daily)"),
-                var_alpha=var_conf
+                want_sortino=want("Sortino"), want_calmar=want("Calmar"),
+                want_var=want("VaR (daily)"), want_cvar=want("CVaR (daily)"), var_alpha=var_conf
             )
             metrics_dict[disp] = m
-
         metrics_df = pd.DataFrame(metrics_dict)
 
-        # ordre d’affichage : rendement, vol, maxDD, ratios & risques (avec *)
-        cols_order = ["Annualized Return %", "Cumulative Return %", "Volatility* (%)", "Max Drawdown* (%)", "Sharpe*"]
-        if want("Sortino"): cols_order.append("Sortino*")
-        if want("Calmar"):  cols_order.append("Calmar*")
-        if want("VaR (daily)"):   cols_order.append("VaR* (daily)")
-        if want("CVaR (daily)"):  cols_order.append("CVaR* (daily)")
+        # Ordre : Vol, MaxDD sous Vol, puis Sharpe, Sortino, Calmar, Var/CVar
+        cols_order = ["Annualized Return %","Cumulative Return %","Volatility %","Max Drawdown %","Sharpe"]
+        if "Sortino" in risk_measures: cols_order.append("Sortino")
+        if "Calmar" in risk_measures: cols_order.append("Calmar")
+        if "VaR (daily)" in risk_measures: cols_order.append("VaR (daily)")
+        if "CVaR (daily)" in risk_measures: cols_order.append("CVaR (daily)")
         metrics_df = metrics_df.reindex(index=cols_order)
 
         st.markdown("### Comparaison de portefeuilles")
         st.dataframe(metrics_df, use_container_width=True, height=320)
-        st.caption(f"Rebalancing : **{rebal_mode}** | Taux sans risque utilisé : **{risk_free_rate_percent:.2f}%** (annualisé).")
+        st.caption(f"Rebalancing : **{rebal_mode}** | RF utilisé : **{risk_free_rate_percent:.2f}%** (annualisé).")
 
-        # Composition textuelle des portefeuilles
-        def alloc_to_text(alloc: dict) -> str:
+        # Composition textuelle
+        def alloc_to_text(alloc):
             items = []
             for t, w in sorted(alloc.items(), key=lambda x: -x[1]):
-                if w <= 0: 
-                    continue
+                if w <= 0: continue
                 items.append(f"{asset_names_map.get(t, t)} {w*100:.1f}%")
             return ", ".join(items)
 
         comp_lines = []
         for key, alloc in portfolio_allocations.items():
             disp = port_names_display.get(key, key)
-            comp_lines.append(f"{disp} : {alloc_to_text(alloc)}")
-        st.markdown("**Compositions :**  \n" + "\n".join(f"- {l}" for l in comp_lines))
+            comp_lines.append(f"<b>{disp}</b> : {alloc_to_text(alloc)}")
+        st.markdown("**Compositions :**<br>" + "<br>".join(comp_lines), unsafe_allow_html=True)
 
-        # Graph “performance cumulée” des portefeuilles (base 100)
+        # Graph Perf des 3 portefeuilles
         fig_ports = plot_portfolios_cum(port_returns, f"Performance cumulée des portefeuilles ({rebal_mode})")
         st.plotly_chart(fig_ports, use_container_width=True)
 
         # ---------------- Export Excel & PDF --------------------------
         st.subheader("📥 Exporter les résultats")
-        perf_pct = (df_graph.ffill().bfill()/df_graph.ffill().bfill().iloc[0] - 1) * 100
-
+        perf_pct = (df_graph.ffill().bfill()/df_graph.ffill().bfill().iloc[0]-1)*100
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
             df.rename(columns=asset_names_map).to_excel(writer, sheet_name="Prix")
@@ -690,32 +664,26 @@ if st.button("🔎 Analyser"):
             metrics_df.to_excel(writer, sheet_name="Résumé Portefeuilles")
             gaps.to_excel(writer, sheet_name="Data Gaps", index=False)
         excel_buffer.seek(0)
-        st.download_button(
-            "📄 Télécharger les données & métriques (.xlsx)",
-            data=excel_buffer,
-            file_name="donnees_completes.xlsx"
-        )
+        st.download_button("📄 Télécharger les données & métriques (.xlsx)",
+                           data=excel_buffer, file_name="donnees_completes.xlsx")
 
         if include_pdf:
             charts_for_pdf = {
                 "Matrice de corrélation": fig_heat,
-                "Performances cumulées (barres)": fig_perf,
-                "Évolution des actifs (Base 100)": fig_lines,
-                "Poche crypto vs benchmark": fig_rel,
-                "Portefeuilles (Base 100)": fig_ports,
+                "Performances cumulées": fig_perf,
+                "Évolution (base 100)": fig_lines,
+                "Perf relative vs benchmark": fig_rel,
+                "Portefeuilles (base 100)": fig_ports,
             }
-            pdf_buf = generate_pdf_report(
-                company_name, logo_file, charts_for_pdf, metrics_df, composition_lines=comp_lines
-            )
-            st.download_button(
-                "🖼️ Télécharger le rapport PDF",
-                data=pdf_buf,
-                file_name="rapport_portefeuille.pdf",
-                mime="application/pdf"
-            )
+            # Composition en texte simple pour PDF (sans HTML)
+            comp_plain = [Paragraph(line.replace("<b>","").replace("</b>",""), getSampleStyleSheet()["BodyText"])
+                          for line in comp_lines]  # on passera mieux via generate_pdf_report
+            pdf_buf = generate_pdf_report(company_name, logo_file, charts_for_pdf, metrics_df, composition_lines=[l for l in [c.getPlainText() if hasattr(c,'getPlainText') else None for c in comp_plain] if l])
+            st.download_button("🖼️ Télécharger le rapport PDF",
+                               data=pdf_buf, file_name="rapport_portefeuille.pdf", mime="application/pdf")
 
         if "US 10Y Yield" in selected_comparisons or benchmark_label == "US 10Y Yield":
-            st.info("ℹ️ '^TNX' représente un rendement (et non un prix). Interpréter les comparaisons avec prudence.")
+            st.info("ℹ️ 'US 10Y Yield' (^TNX) est un rendement (pas un prix). Interpréter les comparaisons avec prudence.")
 
         # ---------------- Notes / Glossaire risques -------------------
         st.markdown("---")
@@ -730,8 +698,8 @@ if st.button("🔎 Analyser"):
             "- **VaR*** (historique, daily) : perte **seuil** telle qu’elle n’est dépassée que dans (1−α) des cas (ex. α=95% ⇒ 5% des pires jours au-delà de la VaR).\n"
             "- **CVaR*** (ou Expected Shortfall) : **perte moyenne** conditionnelle au-delà de la VaR (mesure la gravité des pires jours)."
         )
-
+      
     except Exception as e:
         st.error("❌ Erreur lors du chargement ou de l’analyse des données.")
         st.code(str(e))
-        st.info("💡 Réessayez avec une période, un benchmark ou un sous-ensemble d’actifs plus restreint.")
+        st.info("💡 Réessayez avec une période, un actif, ou un sous-ensemble plus restreint.")
