@@ -668,7 +668,7 @@ with c2:
 # ----------------------------------------------------------------------------------------
 st.markdown("**Liste des actifs à comparer**")
 compare_assets = [a for a in available_assets]
-preselect = ["Bitcoin (BTC$)","Ethereum (ETH$)","MSCI World","Nasdaq","S&P 500","US 10Y Yield","Dollar Index","Gold"]
+preselect = ["Bitcoin (BTC$)","Ethereum (ETH$)","MSCI World","S&P 500","Gold"]
 safe_default = [a for a in preselect if a in compare_assets]
 selected_comparisons = st.multiselect("📊 Actifs à comparer :", compare_assets, default=safe_default)
 compare_tickers = [full_asset_mapping[a] for a in selected_comparisons if a in full_asset_mapping]
