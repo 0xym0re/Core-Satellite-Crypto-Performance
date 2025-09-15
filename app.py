@@ -1,83 +1,86 @@
-# Core-Satellite-Crypto-Performance — v2 (rebalancing + risk metrics + gaps + Plotly + PDF)
+# Core-Satellite-Crypto-Performance — v3
 # ----------------------------------------------------------------------------------------
-# Nouveautés :
-# - Rebalancing : Buy & Hold (drift), Monthly, Quarterly
-# - Risk metrics : Sharpe (avec RF), Sortino, Calmar, VaR/CVaR (historiques, daily)
-# - Data gaps : détection détaillée + alertes
-# - Graphiques : Plotly interactifs (cumul, barres, heatmap)
-# - PDF pro : logo + couleurs via ReportLab, charts Plotly exportés avec kaleido
+# Nouveautés vs v2 :
+# - Benchmark dédié (sélecteur) + graphique de performance relative
+# - Crypto list dynamique (CoinGecko, mcap>200M) + validation Yahoo + fallback statique
+# - Composition des portefeuilles affichée (ex: 60/40 ; 60/40 + X% crypto)
+# - Max Drawdown remis sous la volatilité dans le tableau comparatif
+# - Rapport PDF amélioré : logo non déformé (ratio), tableau plus propre, + graph "3 portefeuilles"
+# - Graphs Plotly conservés (heatmap, barres, base 100) + relative vs benchmark
 
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import io
+import io, math, requests
 from datetime import timedelta
-from matplotlib.colors import LinearSegmentedColormap  # conservé si tu veux garder le cmap
-from matplotlib.backends.backend_pdf import PdfPages   # utilisé avant; on bascule sur ReportLab
 import plotly.express as px
 import plotly.graph_objects as go
+
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors as rl_colors
-from reportlab.pdfgen import canvas
 from reportlab.lib.units import cm
-from reportlab.platypus import Table, TableStyle, Paragraph, SimpleDocTemplate, Image
+from reportlab.platypus import Table, TableStyle, Paragraph, SimpleDocTemplate, Image as RLImage, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
+from PIL import Image as PILImage
 
 # --------------------------------------------------------------------
-# Charte graphique (UI + PDF)
-primary_color = "#4E26DF"
-secondary_color = "#7CEF17"
-performance_colors = ["#4E26DF", "#7CEF17", "#35434B", "#B8A8F2", "#C1E5F5", "#C3F793",
-                      "#F2CFEE","#F2F2F2","#FCD9C4", "#A7C7E7", "#D4C2FC", "#F9F6B2", "#C4FCD2"]
+# Charte graphique
+PRIMARY = "#4E26DF"
+SECONDARY = "#7CEF17"
+PERF_COLORS = ["#4E26DF","#7CEF17","#35434B","#B8A8F2","#C1E5F5","#C3F793",
+               "#F2CFEE","#F2F2F2","#FCD9C4","#A7C7E7","#D4C2FC","#F9F6B2","#C4FCD2"]
 
 # --------------------------------------------------------------------
-# Mappings Yahoo (nettoyés)
+# Mappings de base (fallback)
 asset_mapping = {
     "MSCI World": "URTH",
     "Nasdaq": "^IXIC",
     "S&P 500": "^GSPC",
-    "US 10Y Yield": "^TNX",
+    "US 10Y Yield": "^TNX",     # rendement, pas un prix
     "Dollar Index": "DX-Y.NYB",
     "Gold": "GC=F",
-    "iShares Bonds Agregate": "AGGG.L"
+    "iShares Bonds Agregate": "AGGG.L",
 }
-crypto_mapping = {
+# Liste crypto statique (fallback si API indispo)
+crypto_static = {
     "Bitcoin (BTC$)": "BTC-USD",
-    "Bitcoin (BTC€)": "BTC-EUR",
     "Ethereum (ETH$)": "ETH-USD",
-    "Ethereum (ETH€)": "ETH-EUR",
     "Solana (SOL)": "SOL-USD",
-    "Cardano (ADA)": "ADA-USD",
-    "Ripple (XRP)": "XRP-USD",
-    "Polkadot (DOT)": "DOT-USD",
-    "Chainlink (LINK)": "LINK-USD",
-    "Litecoin (LTC)": "LTC-USD",
-    "Stellar (XLM)": "XLM-USD",
-    "Dogecoin (DOGE)": "DOGE-USD",
-    "Avalanche (AVAX)": "AVAX-USD",
-    "Polygon (MATIC)": "MATIC-USD",
-    "Cosmos (ATOM)": "ATOM-USD",
-    "Algorand (ALGO)": "ALGO-USD",
-    "Filecoin (FIL)": "FIL-USD",
     "Binance Coin (BNB)": "BNB-USD",
-    "Tron (TRX)": "TRX-USD",
+    "XRP (XRP)": "XRP-USD",
+    "Cardano (ADA)": "ADA-USD",
+    "Dogecoin (DOGE)": "DOGE-USD",
+    "Polygon (MATIC)": "MATIC-USD",
+    "TRON (TRX)": "TRX-USD",
+    "Toncoin (TON)": "TON11419-USD",  # peut être indispo sur Yahoo selon régions
+    "Polkadot (DOT)": "DOT-USD",
+    "Litecoin (LTC)": "LTC-USD",
     "Bitcoin Cash (BCH)": "BCH-USD",
+    "Chainlink (LINK)": "LINK-USD",
+    "Stellar (XLM)": "XLM-USD",
     "Monero (XMR)": "XMR-USD",
-    "Uniswap (UNI)": "UNI-USD",
-    "Near Protocol (NEAR)": "NEAR-USD",
-    "Aave (AAVE)": "AAVE-USD",
-    "Cronos (CRO)": "CRO-USD",
-    "Vechain (VET)": "VET-USD",
-    "Celestia (TIA)": "TIA-USD",
+    "Avalanche (AVAX)": "AVAX-USD",
+    "Aptos (APT)": "APT-USD",
+    "NEAR Protocol (NEAR)": "NEAR-USD",
     "Arbitrum (ARB)": "ARB-USD",
     "Render (RNDR)": "RNDR-USD",
     "Optimism (OP)": "OP-USD",
-    "Fetch.AI (FET)": "FET-USD",
+    "Uniswap (UNI)": "UNI-USD",
+    "Cosmos (ATOM)": "ATOM-USD",
+    "Filecoin (FIL)": "FIL-USD",
+    "Aave (AAVE)": "AAVE-USD",
+    "Sui (SUI)": "SUI-USD",
     "Maker (MKR)": "MKR-USD",
+    "IOTA (IOTA)": "IOTA-USD",
+    "Algorand (ALGO)": "ALGO-USD",
+    "VeChain (VET)": "VET-USD",
+    "Injective (INJ)": "INJ-USD",
+    "Celestia (TIA)": "TIA-USD",
     "Jupiter (JUP)": "JUP-USD",
     "Synthetix (SNX)": "SNX-USD",
-    "Flux (FLUX)": "FLUX-USD",
+    "The Graph (GRT)": "GRT-USD",
+    "Fetch.AI (FET)": "FET-USD",
 }
 us_equity_mapping = {
     "Apple (AAPL)": "AAPL",
@@ -86,15 +89,11 @@ us_equity_mapping = {
     "NVIDIA (NVDA)": "NVDA",
     "Alphabet (GOOGL)": "GOOGL",
     "Meta (META)": "META",
-    "Tesla (TSLA)": "TSLA"
+    "Tesla (TSLA)": "TSLA",
 }
-full_asset_mapping = {**asset_mapping, **crypto_mapping, **us_equity_mapping}
-asset_names_map = {v: k for k, v in full_asset_mapping.items()}
-crypto_tickers_set = set(crypto_mapping.values())
-traditional_tickers_set = set(asset_mapping.values()) | set(us_equity_mapping.values())
 
 # --------------------------------------------------------------------
-# Streamlit config
+# App config
 st.set_page_config(page_title="Alphacap", layout="wide")
 st.title("Comparaison de performances d'actifs")
 
@@ -102,14 +101,16 @@ st.title("Comparaison de performances d'actifs")
 # Portefeuilles de base
 portfolio_allocations = {
     "Portfolio 1": {"^GSPC": 0.60, "AGGG.L": 0.40},
-    "Portfolio 2": {"^GSPC": 0.57, "AGGG.L": 0.38, "GC=F": 0.05}
+    "Portfolio 2": {"^GSPC": 0.57, "AGGG.L": 0.38, "GC=F": 0.05},
 }
+def portfolio1_label(): return "Portefeuille 1 (60/40)"
+def portfolio2_label(): return "Portefeuille 2 (60/40 + 5% Or)"
 
-# ------------------ Utils & Core ------------------------------------
+# --------------------------------------------------------------------
+# Helpers data
 @st.cache_data(ttl=3600, show_spinner=False)
 def download_prices(tickers, start, end):
-    if isinstance(tickers, str):
-        tickers = [tickers]
+    if isinstance(tickers, str): tickers = [tickers]
     data = yf.download(
         tickers, start=start, end=end + pd.Timedelta(days=1),
         interval="1d", auto_adjust=False, group_by="column",
@@ -131,20 +132,19 @@ def download_prices(tickers, start, end):
             df = data["Close"].to_frame(name=tickers[0])
         else:
             df = data.to_frame(name=tickers[0])
-    # Index calendrier complet
     full_idx = pd.date_range(start=start, end=end, freq="D")
     df = df.reindex(full_idx).sort_index()
-    # Colonnes manquantes -> NA
     for t in tickers:
         if t not in df.columns:
             df[t] = pd.NA
     return df
 
-def is_crypto_ticker(t): return t in crypto_tickers_set
+def is_crypto_ticker(t, crypto_set):
+    return t in crypto_set
 
-def annualization_factor_for_portfolio(allocations):
+def annualization_factor_for_portfolio(allocations, crypto_set):
     for t, w in allocations.items():
-        if w > 0 and is_crypto_ticker(t):
+        if w > 0 and is_crypto_ticker(t, crypto_set):
             return 365
     return 252
 
@@ -156,38 +156,19 @@ def renormalize_weights_if_needed(prices_df, allocations):
     w = w / w.sum()
     return dict(zip(tickers, w)), tickers
 
-def build_portfolio3(portfolio1_alloc, crypto_global_pct, crypto_allocation_pairs):
-    portfolio3 = {}
-    classic_weight = 1 - crypto_global_pct / 100.0
-    for t, w in portfolio1_alloc.items():
-        portfolio3[t] = portfolio3.get(t, 0.0) + w * classic_weight
-    for name, pct in crypto_allocation_pairs:
-        ticker = crypto_mapping[name]
-        weight = (pct / 100.0) * (crypto_global_pct / 100.0)
-        portfolio3[ticker] = portfolio3.get(ticker, 0.0) + weight
-    return portfolio3
-
-# ------------------ Data quality / gaps ------------------------------
-def detect_data_gaps(df, expected_freq="D"):
-    """Retourne un DataFrame avec : %NA, nb_days, nb_na, plus long gap consécutif."""
+def detect_data_gaps(df):
     stats = []
-    idx = df.index
     for col in df.columns:
         s = df[col]
         total = len(s)
         na = int(s.isna().sum())
-        # Longest consecutive NaNs
-        max_gap = 0
-        current = 0
+        max_gap = 0; current = 0
         for v in s.isna().values:
-            if v:
-                current += 1
-                max_gap = max(max_gap, current)
-            else:
-                current = 0
+            if v: current += 1; max_gap = max(max_gap, current)
+            else: current = 0
         stats.append({
             "Ticker": col,
-            "Nom": asset_names_map.get(col, col),
+            "Nom": col,  # remplacé plus tard
             "Days": total,
             "NA": na,
             "NA_%": round(100*na/total, 2) if total > 0 else np.nan,
@@ -197,52 +178,38 @@ def detect_data_gaps(df, expected_freq="D"):
 
 # ------------------ Rebalancing engine -------------------------------
 def portfolio_returns_buy_and_hold(prices, allocations):
-    """Buy & Hold (weights driftent) — calcule les retours quotidiens du portefeuille."""
     alloc_norm, tickers = renormalize_weights_if_needed(prices, allocations)
     if not tickers: return pd.Series(dtype=float)
-    P = prices[tickers].copy()
-    P = P.ffill()  # nécessaire pour ratio
+    P = prices[tickers].copy().ffill()
     base = P.iloc[0].replace(0, np.nan)
-    norm = P.divide(base)
-    w = np.array([alloc_norm[t] for t in tickers], dtype=float)
-    nav = (norm * w).sum(axis=1)
-    rets = nav.pct_change().dropna()
-    return rets
-
-def _block_weighted_returns(block_returns, target_weights):
-    """Retour pondéré avec weights constants sur un bloc (rebalance au début du bloc)."""
-    cols = [c for c in block_returns.columns if c in target_weights]
-    if len(cols) == 0: return pd.Series(dtype=float)
-    w = np.array([target_weights[c] for c in cols], dtype=float)
-    w = w / w.sum()
-    return (block_returns[cols] * w).sum(axis=1)
+    nav = (P.divide(base) * np.array([alloc_norm[t] for t in tickers])).sum(axis=1)
+    return nav.pct_change().dropna()
 
 def portfolio_returns_with_rebalancing(prices, allocations, freq="M"):
-    """Rebalance au début de chaque période (M/Q). Returns calendaire quotidiens concatenés."""
     alloc_norm, tickers = renormalize_weights_if_needed(prices, allocations)
     if not tickers: return pd.Series(dtype=float)
     P = prices[tickers].copy().ffill()
     R = P.pct_change().dropna(how="all")
-    # dates de rebalance : début de mois/trimestre
-    if freq == "M":
-        keys = R.index.to_period("M")
-    elif freq == "Q":
-        keys = R.index.to_period("Q")
-    else:
-        raise ValueError("freq must be 'M' or 'Q'")
-    pieces = []
+    keys = R.index.to_period("M" if freq=="M" else "Q")
+    parts = []
+    w_full = np.array([alloc_norm[c] for c in tickers], dtype=float)
     for _, g in R.groupby(keys):
-        # sur ce bloc, weights cibles constants (renormalisés aux cols présentes)
         cols = [c for c in g.columns if c in alloc_norm]
         if not cols: continue
         w = np.array([alloc_norm[c] for c in cols], dtype=float)
         if w.sum() <= 0: continue
         w = w / w.sum()
-        rp = (g[cols] * w).sum(axis=1)
-        pieces.append(rp)
-    if not pieces:
-        return pd.Series(dtype=float)
-    return pd.concat(pieces).sort_index()
+        parts.append((g[cols] * w).sum(axis=1))
+    if not parts: return pd.Series(dtype=float)
+    return pd.concat(parts).sort_index()
+
+def portfolio_daily_returns(prices, allocations, rebal_mode):
+    if rebal_mode.startswith("Buy"):
+        return portfolio_returns_buy_and_hold(prices, allocations)
+    elif rebal_mode.startswith("Monthly"):
+        return portfolio_returns_with_rebalancing(prices, allocations, "M")
+    else:
+        return portfolio_returns_with_rebalancing(prices, allocations, "Q")
 
 # ------------------ Risk metrics -------------------------------------
 def drawdown_stats(series):
@@ -255,50 +222,36 @@ def drawdown_stats(series):
 def compute_metrics_from_returns(r, dpy=252, rf_annual=0.0,
                                  want_sortino=True, want_calmar=True,
                                  want_var=False, want_cvar=False, var_alpha=0.95):
-    """r: daily returns series (calendar)."""
-    if r is None or len(r) == 0:
-        return {}
-    # Annualized stats (arithmétique simple)
+    if r is None or len(r) == 0: return {}
     cum_ret = (1 + r).prod() - 1
     ann_ret = (1 + cum_ret)**(dpy/len(r)) - 1 if len(r) > 0 else np.nan
     vol = r.std() * np.sqrt(dpy)
-
-    # Sharpe (RF annual en décimal)
     excess = ann_ret - rf_annual
     sharpe = excess/vol if vol and vol != 0 else np.nan
-
-    # MaxDD & Calmar
     dd, max_dd = drawdown_stats(r)
     calmar = (ann_ret/abs(max_dd)) if want_calmar and max_dd and max_dd != 0 else np.nan
-
-    # Sortino
     sortino = np.nan
     if want_sortino:
-        downside = r.copy()
-        downside[downside > 0] = 0
+        downside = r.copy(); downside[downside > 0] = 0
         down_stdev = downside.std() * np.sqrt(dpy)
         sortino = (excess/down_stdev) if down_stdev and down_stdev != 0 else np.nan
-
-    # VaR / CVaR (historique, daily)
     var_val = cvar_val = np.nan
     if want_var or want_cvar:
-        # on travaille sur la distribution quotidienne
         losses = -r.dropna()
         if len(losses) > 0:
-            q = np.quantile(losses, var_alpha)  # ex: 95% → perte dépassée 5% du temps
+            q = np.quantile(losses, var_alpha)
             if want_var: var_val = q
             if want_cvar:
                 tail = losses[losses >= q]
                 cvar_val = tail.mean() if len(tail) > 0 else q
-
     return {
         "Annualized Return %": round(ann_ret*100, 2),
         "Cumulative Return %": round(cum_ret*100, 2),
         "Volatility %": round(vol*100, 2),
-        "Sharpe": round(sharpe, 2),
         "Max Drawdown %": round(max_dd*100, 2) if pd.notna(max_dd) else np.nan,
-        "Calmar": round(calmar, 2) if pd.notna(calmar) else np.nan,
+        "Sharpe": round(sharpe, 2),
         "Sortino": round(sortino, 2) if pd.notna(sortino) else np.nan,
+        "Calmar": round(calmar, 2) if pd.notna(calmar) else np.nan,
         "VaR (daily)": round(var_val*100, 2) if pd.notna(var_val) else np.nan,
         "CVaR (daily)": round(cvar_val*100, 2) if pd.notna(cvar_val) else np.nan,
     }
@@ -309,30 +262,22 @@ def plot_cumulative_lines(df_prices, names_map, title):
     df_norm = df_norm / df_norm.iloc[0] * 100
     fig = go.Figure()
     for col in df_norm.columns:
-        fig.add_trace(go.Scatter(
-            x=df_norm.index, y=df_norm[col],
-            mode='lines', name=names_map.get(col, col)
-        ))
-    fig.update_layout(
-        title=title, xaxis_title="", yaxis_title="Base 100",
-        legend=dict(orientation="h", y=-0.2),
-        margin=dict(l=20, r=20, t=60, b=60), template="plotly_white"
-    )
+        fig.add_trace(go.Scatter(x=df_norm.index, y=df_norm[col], mode='lines',
+                                 name=names_map.get(col, col)))
+    fig.update_layout(title=title, xaxis_title="", yaxis_title="Base 100",
+                      legend=dict(orientation="h", y=-0.2),
+                      margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
     return fig
 
 def plot_perf_bars(df_prices, names_map, title):
     df = df_prices.ffill().bfill()
     perf = (df.iloc[-1]/df.iloc[0] - 1).sort_values(ascending=False)
-    fig = px.bar(
-        perf.rename(index=names_map).rename("Performance"),
-        text=perf.apply(lambda x: f"{x*100:.2f}%")
-    )
+    s = perf.rename(index=names_map).rename("Performance")
+    fig = px.bar(s, text=s.apply(lambda x: f"{x*100:.2f}%"))
     fig.update_traces(textposition='outside', cliponaxis=False)
-    fig.update_layout(
-        title=title, yaxis_title="Performance", xaxis_title="",
-        uniformtext_minsize=8, uniformtext_mode='hide',
-        margin=dict(l=20, r=20, t=60, b=60), template="plotly_white"
-    )
+    fig.update_layout(title=title, yaxis_title="Performance", xaxis_title="",
+                      uniformtext_minsize=8, uniformtext_mode='hide',
+                      margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
     return fig
 
 def plot_heatmap_corr(df_prices, names_map, title):
@@ -340,65 +285,114 @@ def plot_heatmap_corr(df_prices, names_map, title):
     C = R.corr()
     C.index = [names_map.get(c, c) for c in C.index]
     C.columns = [names_map.get(c, c) for c in C.columns]
-    fig = px.imshow(
-        C, text_auto=".2f", aspect="auto", color_continuous_scale=["#4E26DF","#a993fa","#CAE5F5","#F2F2F2","#C3F793","#7CEF17"]
-    )
+    fig = px.imshow(C, text_auto=".2f", aspect="auto",
+                    color_continuous_scale=["#4E26DF","#a993fa","#CAE5F5","#F2F2F2","#C3F793","#7CEF17"])
     fig.update_layout(title=title, margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
     return fig
 
-# ------------------ PDF report (ReportLab + Plotly->PNG via kaleido) --
+def plot_relative_vs_benchmark(df_all, benchmark_ticker, names_map, title):
+    df = df_all.ffill().bfill()
+    if benchmark_ticker not in df.columns:
+        return go.Figure()
+    bench = (df[benchmark_ticker]/df[benchmark_ticker].iloc[0])
+    rel = (df.divide(bench, axis=0) - 1.0) * 100  # en %
+    fig = go.Figure()
+    for col in [c for c in df.columns if c != benchmark_ticker]:
+        fig.add_trace(go.Scatter(x=rel.index, y=rel[col], mode='lines',
+                                 name=names_map.get(col, col)))
+    fig.update_layout(title=title, xaxis_title="", yaxis_title="Sur/ss perf vs benchmark (%)",
+                      legend=dict(orientation="h", y=-0.2),
+                      margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
+    return fig
+
+def plot_portfolios_cum(nav_dict, title):
+    fig = go.Figure()
+    for name, r in nav_dict.items():
+        if r is None or r.empty: continue
+        cum = (1+r).cumprod()*100
+        fig.add_trace(go.Scatter(x=cum.index, y=cum, mode='lines', name=name))
+    fig.update_layout(title=title, xaxis_title="", yaxis_title="Base 100",
+                      legend=dict(orientation="h", y=-0.2),
+                      margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
+    return fig
+
 def fig_to_png_bytes(fig, scale=2):
     return fig.to_image(format="png", scale=scale)
 
-def generate_pdf_report(company_name, logo_file, primary_hex, secondary_hex,
-                        charts_dict, metrics_df):
-    """
-    charts_dict: {"Heatmap": fig, "Perf bars": fig, "Cum lines": fig, ...}
-    metrics_df: pandas DataFrame (petit tableau)
-    """
+# ------------------ PDF report ---------------------------------------
+def keep_aspect_image(file_like, target_width_cm):
+    try:
+        im = PILImage.open(file_like)
+        w, h = im.size
+        ar = w / h
+        target_w = target_width_cm * cm
+        target_h = target_w / ar
+        file_like.seek(0)
+        return RLImage(file_like, width=target_w, height=target_h)
+    except Exception:
+        file_like.seek(0)
+        return RLImage(file_like, width=3*cm, height=3*cm)
+
+def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, composition_lines):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm,
                             topMargin=1.2*cm, bottomMargin=1.2*cm)
     elements = []
     styles = getSampleStyleSheet()
     title_style = styles["Title"]
-    normal = styles["Normal"]
+    h2 = styles["Heading2"]
+    normal = styles["BodyText"]
 
-    # Header: logo + title
+    # Header : logo + titre
     if logo_file is not None:
         try:
-            logo = Image(logo_file, width=3*cm, height=3*cm)
-            elements.append(logo)
+            logo_buf = io.BytesIO(logo_file.read())
+            logo_img = keep_aspect_image(logo_buf, target_width_cm=4.5)  # largeur ~4.5cm
+            elements.append(logo_img)
+            elements.append(Spacer(1, 0.2*cm))
         except Exception:
             pass
     elements.append(Paragraph(f"{company_name} — Portfolio Report", title_style))
-    elements.append(Paragraph(" ", normal))
+    elements.append(Spacer(1, 0.3*cm))
+
+    # Compositions
+    if composition_lines:
+        elements.append(Paragraph("Compositions des portefeuilles", h2))
+        for line in composition_lines:
+            elements.append(Paragraph(line, normal))
+        elements.append(Spacer(1, 0.2*cm))
 
     # Charts
     for name, fig in charts_dict.items():
         try:
-            png = fig_to_png_bytes(fig)
-            img = Image(io.BytesIO(png), width=17*cm, height=9*cm)
-            elements.append(Paragraph(name, styles["Heading2"]))
-            elements.append(img)
-            elements.append(Paragraph(" ", normal))
+            png = fig_to_png_bytes(fig, scale=2)
+            elements.append(Paragraph(name, h2))
+            elements.append(RLImage(io.BytesIO(png), width=17*cm, height=9*cm))
+            elements.append(Spacer(1, 0.3*cm))
         except Exception:
             continue
 
-    # Metrics table
+    # Metrics table (plus clean)
     if metrics_df is not None and not metrics_df.empty:
-        elements.append(Paragraph("Portfolio Metrics", styles["Heading2"]))
-        data = [ [str(x) for x in ["Metric"] + metrics_df.columns.tolist()] ]
-        for idx, row in metrics_df.iterrows():
-            data.append([str(idx)] + [str(v) for v in row.values])
-        table = Table(data, repeatRows=1)
+        elements.append(Paragraph("Portfolio Metrics", h2))
+        # formater
+        df = metrics_df.copy()
+        # construire data = header + rows
+        data = [["Metric"] + df.columns.tolist()]
+        for idx, row in df.iterrows():
+            data.append([idx] + [("" if pd.isna(v) else str(v)) for v in row.values])
+        table = Table(data, repeatRows=1, colWidths=[5*cm] + [3.0*cm]*len(df.columns))
         table.setStyle(TableStyle([
-            ('BACKGROUND',(0,0),(-1,0), rl_colors.HexColor(primary_hex)),
+            ('BACKGROUND',(0,0),(-1,0), rl_colors.HexColor(PRIMARY)),
             ('TEXTCOLOR',(0,0),(-1,0), rl_colors.white),
             ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
-            ('ALIGN',(0,0),(-1,-1),'CENTER'),
-            ('GRID',(0,0),(-1,-1),0.3, rl_colors.grey),
+            ('FONTSIZE',(0,0),(-1,0),10),
+            ('ALIGN',(1,1),(-1,-1),'RIGHT'),
+            ('ALIGN',(0,0),(0,-1),'LEFT'),
+            ('GRID',(0,0),(-1,-1),0.3, rl_colors.HexColor("#DDDDDD")),
             ('ROWBACKGROUNDS',(0,1),(-1,-1), [rl_colors.whitesmoke, rl_colors.HexColor("#F7F7F7")]),
+            ('BOTTOMPADDING',(0,0),(-1,0),6),
+            ('TOPPADDING',(0,0),(-1,0),6),
         ]))
         elements.append(table)
 
@@ -406,30 +400,74 @@ def generate_pdf_report(company_name, logo_file, primary_hex, secondary_hex,
     buffer.seek(0)
     return buffer
 
-# ------------------ UI : paramètres ----------------------------------
+# ------------------ UI : sidebar -------------------------------------
 with st.sidebar:
     st.header("Paramètres")
-    risk_free_rate_percent = st.number_input(
-        "Taux sans risque annuel (%)", min_value=-5.0, max_value=20.0, value=0.0, step=0.1
-    )
-    rebal_mode = st.selectbox(
-        "Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"],
-        help="Buy & Hold = drift ; Monthly/Quarterly = rebalance au début de période."
-    )
-    risk_measures = st.multiselect(
-        "Mesures de risque à afficher",
-        ["Sharpe","Sortino","Calmar","VaR (daily)","CVaR (daily)"],
-        default=["Sharpe","Sortino","Calmar"]
-    )
+    risk_free_rate_percent = st.number_input("Taux sans risque annuel (%)", -5.0, 20.0, 0.0, 0.1)
+    rebal_mode = st.selectbox("Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"])
+    risk_measures = st.multiselect("Mesures de risque à afficher",
+                                   ["Sharpe","Sortino","Calmar","VaR (daily)","CVaR (daily)"],
+                                   default=["Sharpe","Sortino","Calmar"])
     var_conf = st.slider("Confiance VaR/CVaR (daily)", 0.80, 0.995, 0.95, 0.005)
+
     st.divider()
     st.subheader("Rapport PDF")
-    company_name = st.text_input("Nom société", "Alphacap")
+    company_name = st.text_input("Nom société", "Alphacap Digital Assets")
     logo_file = st.file_uploader("Logo (PNG/JPG)", type=["png","jpg","jpeg"])
     include_pdf = st.checkbox("Générer un rapport PDF à l'export", value=True)
 
-# ------------------ UI poche crypto ---------------------------------
+# ------------------ Crypto list dynamique -----------------------------
+@st.cache_data(ttl=24*3600, show_spinner=False)
+def build_crypto_mapping_dynamic(min_mcap_usd=2e8, pages=4):
+    """
+    Récupère via CoinGecko la liste des cryptos (mcap USD), garde > min_mcap,
+    génère tickers Yahoo 'SYMBOL-USD' et valide sommairement via yfinance (history).
+    """
+    out = {}
+    session = requests.Session()
+    for page in range(1, pages+1):
+        url = ("https://api.coingecko.com/api/v3/coins/markets"
+               f"?vs_currency=usd&order=market_cap_desc&per_page=250&page={page}")
+        r = session.get(url, timeout=15)
+        if r.status_code != 200: break
+        arr = r.json()
+        if not arr: break
+        for it in arr:
+            mcap = it.get("market_cap")
+            if mcap is None or mcap < min_mcap_usd: continue
+            name = it.get("name","").strip()
+            sym = (it.get("symbol","") or "").upper()
+            if not sym: continue
+            # candidat Yahoo
+            y_ticker = f"{sym}-USD"
+            # Quick validate (limité)
+            try:
+                hist = yf.Ticker(y_ticker).history(period="5d")
+                if hist is None or hist.empty: continue
+                out[f"{name} ({sym})"] = y_ticker
+            except Exception:
+                continue
+    # exceptions / corrections possibles
+    # (si besoin : corriger TON, TAO, ENA ... selon disponibilités Yahoo)
+    return out
+
 st.markdown("## 💼 Composition du portefeuille crypto")
+use_dynamic_crypto = st.checkbox("Utiliser la liste crypto dynamique (mcap>200M)", value=True,
+                                 help="Récupère la liste via CoinGecko et vérifie la dispo sur Yahoo. Fallback : liste statique.")
+
+try:
+    crypto_mapping = build_crypto_mapping_dynamic() if use_dynamic_crypto else crypto_static
+except Exception:
+    st.warning("CoinGecko indisponible — fallback sur la liste crypto statique.")
+    crypto_mapping = crypto_static
+
+# Ensemble complet + map noms
+full_asset_mapping = {**asset_mapping, **crypto_mapping, **us_equity_mapping}
+asset_names_map = {v: k for k, v in full_asset_mapping.items()}
+crypto_tickers_set = set(crypto_mapping.values())
+traditional_tickers_set = set(asset_mapping.values()) | set(us_equity_mapping.values())
+
+# ------------------ Poche crypto -------------------------------------
 crypto_options = list(crypto_mapping.keys())
 crypto_allocation = []
 crypto_global_pct = st.number_input("% du portefeuille total alloué à l'allocation crypto", 0.0, 100.0, 5.0, 0.5)
@@ -441,7 +479,8 @@ for i in range(num_crypto):
     with cols[0]:
         selected_crypto = st.selectbox(f"Crypto {i+1}", crypto_options, key=f"crypto_{i}")
     with cols[1]:
-        pct = st.number_input(f"% de la crypto {i+1} dans la poche", 0.0, 100.0, 100.0 if i==0 and num_crypto==1 else 0.0, 0.1, key=f"pct_{i}")
+        default_pct = 100.0 if i==0 and num_crypto==1 else 0.0
+        pct = st.number_input(f"% de la crypto {i+1} dans la poche", 0.0, 100.0, default_pct, 0.1, key=f"pct_{i}")
     crypto_allocation.append((selected_crypto, pct))
     total_pct += pct
 
@@ -451,13 +490,25 @@ elif crypto_global_pct <= 0:
     st.warning("⚠️ Le pourcentage global alloué à la poche crypto doit être > 0.")
 else:
     st.success("✅ Répartition valide du portefeuille.")
-    portfolio3 = build_portfolio3(portfolio_allocations["Portfolio 1"], crypto_global_pct, crypto_allocation)
-    portfolio_allocations["Portfolio 3"] = portfolio3
+    # Portefeuille 3 (60/40 + crypto)
+    def build_portfolio3(portfolio1_alloc, crypto_global_pct, crypto_allocation_pairs):
+        portfolio3 = {}
+        classic_weight = 1 - crypto_global_pct / 100.0
+        for t, w in portfolio1_alloc.items():
+            portfolio3[t] = portfolio3.get(t, 0.0) + w * classic_weight
+        for name, pct in crypto_allocation_pairs:
+            ticker = crypto_mapping[name]
+            weight = (pct / 100.0) * (crypto_global_pct / 100.0)
+            portfolio3[ticker] = portfolio3.get(ticker, 0.0) + weight
+        return portfolio3
+    portfolio_allocations["Portfolio 3"] = build_portfolio3(portfolio_allocations["Portfolio 1"], crypto_global_pct, crypto_allocation)
 
-# ------------------ Sélections d'actifs, période ---------------------
+# ------------------ Sélections d'actifs & période --------------------
 available_assets = list(full_asset_mapping.keys())
-selected_asset = st.selectbox("📌 Sélectionnez un actif :", available_assets)
-asset_ticker = full_asset_mapping[selected_asset]
+
+# >>> Benchmark (au lieu de "sélectionner un actif")
+benchmark_label = st.selectbox("📌 Sélectionnez le benchmark :", available_assets, index=available_assets.index("S&P 500") if "S&P 500" in available_assets else 0)
+benchmark_ticker = full_asset_mapping[benchmark_label]
 
 timeframes = {"1 semaine":"7d","1 mois":"30d","3 mois":"90d","6 mois":"180d","1 an":"365d","2 ans":"730d","3 ans":"1095d","5 ans":"1825d"}
 period_label = st.selectbox("⏳ Période :", list(timeframes.keys()))
@@ -469,21 +520,22 @@ with c1:
 with c2:
     custom_end = st.date_input("Date de fin", value=pd.Timestamp.today() - pd.Timedelta(days=1), disabled=not use_custom_period)
 
+# ------------------ Comparaison d'actifs -----------------------------
 st.markdown("**Liste des actifs à comparer**")
-compare_assets = [a for a in available_assets if a != selected_asset]
+compare_assets = [a for a in available_assets]  # on compare tout ce que l'utilisateur choisit
 preselect = ["Bitcoin (BTC$)","Ethereum (ETH$)","MSCI World","Nasdaq","S&P 500","US 10Y Yield","Dollar Index","Gold"]
 safe_default = [a for a in preselect if a in compare_assets]
 selected_comparisons = st.multiselect("📊 Actifs à comparer :", compare_assets, default=safe_default)
-compare_tickers = [full_asset_mapping[a] for a in selected_comparisons]
+compare_tickers = [full_asset_mapping[a] for a in selected_comparisons if a in full_asset_mapping]
 
 # ------------------ ANALYSE ------------------------------------------
 if st.button("🔎 Analyser"):
     try:
-        tickers_graphiques = list(set(compare_tickers + [asset_ticker]))
+        tickers_graphiques = sorted(set(compare_tickers + [benchmark_ticker]))
         tickers_portefeuilles = set()
         for alloc in portfolio_allocations.values():
             tickers_portefeuilles.update(alloc.keys())
-        tickers_dl = list(set(tickers_graphiques + list(tickers_portefeuilles)))
+        tickers_dl = sorted(set(tickers_graphiques + list(tickers_portefeuilles)))
 
         # Période
         if use_custom_period:
@@ -495,65 +547,72 @@ if st.button("🔎 Analyser"):
 
         # Data
         df = download_prices(tickers_dl, start_date, end_date)
-        # Remplissage limité aux actifs traditionnels (aligne les trous calendrier)
+        # Remplissage limité aux actifs "traditionnels"
         traditional_tickers = [t for t in traditional_tickers_set if t in df.columns]
         if traditional_tickers:
             df[traditional_tickers] = df[traditional_tickers].ffill().bfill()
 
         # Gaps
         gaps = detect_data_gaps(df[tickers_graphiques])
+        gaps["Nom"] = gaps["Ticker"].map(asset_names_map).fillna(gaps["Ticker"])
         critical = gaps[(gaps["NA_%"] > 5) | (gaps["Longest_NA_Streak"] >= 5)]
         with st.expander("🔎 Qualité des données (gaps, NA%)", expanded=len(critical)>0):
-            st.dataframe(gaps.assign(**{"NA_%":gaps["NA_%"].map(lambda x: f"{x:.2f}%")}),
+            gdisp = gaps.copy(); gdisp["NA_%"] = gdisp["NA_%"].map(lambda x: f"{x:.2f}%")
+            st.dataframe(gdisp[["Nom","Ticker","Days","NA","NA_%","Longest_NA_Streak"]],
                          use_container_width=True, height=220)
             if not critical.empty:
-                st.warning("Certaines séries présentent des trous significatifs (NA%>5% ou streak≥5j). Vérifiez les tickers concernés.")
+                st.warning("Certaines séries présentent des trous significatifs (NA%>5% ou streak≥5j).")
 
-        # Label période
         label_period = (f"sur {period_label.lower()}" if not use_custom_period
                         else f"du {start_date.strftime('%d/%m/%Y')} au {end_date.strftime('%d/%m/%Y')}")
 
-        # Graphiques Plotly
+        # Graphs
         df_graph = df[tickers_graphiques]
         fig_heat = plot_heatmap_corr(df_graph, asset_names_map, f"Matrice de corrélation {label_period}")
         fig_perf = plot_perf_bars(df_graph, asset_names_map, f"Performances cumulées {label_period}")
         fig_lines = plot_cumulative_lines(df_graph, asset_names_map, f"Évolution des actifs {label_period}")
+        fig_rel = plot_relative_vs_benchmark(df_graph, benchmark_ticker, asset_names_map,
+                                             f"Sur-/sous-performance vs benchmark ({asset_names_map.get(benchmark_ticker, benchmark_ticker)}) {label_period}")
 
         st.plotly_chart(fig_heat, use_container_width=True)
         st.plotly_chart(fig_perf, use_container_width=True)
         st.plotly_chart(fig_lines, use_container_width=True)
+        st.plotly_chart(fig_rel, use_container_width=True)
 
         # ---------------- Portefeuilles & métriques -------------------
         rf_annual = risk_free_rate_percent / 100.0
+        port_returns = {}
+        port_names_display = {}
 
-        def portfolio_daily_returns(prices, allocations):
-            if rebal_mode.startswith("Buy"):
-                return portfolio_returns_buy_and_hold(prices, allocations)
-            elif rebal_mode.startswith("Monthly"):
-                return portfolio_returns_with_rebalancing(prices, allocations, freq="M")
-            else:
-                return portfolio_returns_with_rebalancing(prices, allocations, freq="Q")
+        # Noms jolis
+        port_names_display["Portfolio 1"] = portfolio1_label()
+        port_names_display["Portfolio 2"] = portfolio2_label()
+        # Portfolio 3 (avec % crypto)
+        if "Portfolio 3" in portfolio_allocations:
+            port_names_display["Portfolio 3"] = f"Portefeuille 3 (60/40 + {crypto_global_pct:.0f}% Crypto)"
 
+        # Calcul des retours quotidiens selon rebalancing
+        for key, alloc in portfolio_allocations.items():
+            r = portfolio_daily_returns(df, alloc, rebal_mode)
+            port_returns[port_names_display.get(key, key)] = r
+
+        # Metrics
+        def want(x): return x in risk_measures
         metrics_dict = {}
-        port_returns_dict = {}
-        for name, alloc in portfolio_allocations.items():
-            # annualization factor
-            dpy = annualization_factor_for_portfolio(alloc)
-            r = portfolio_daily_returns(df, alloc)
-            port_returns_dict[name] = r
-            want_var = "VaR (daily)" in risk_measures
-            want_cvar = "CVaR (daily)" in risk_measures
+        for key, alloc in portfolio_allocations.items():
+            disp = port_names_display.get(key, key)
+            dpy = annualization_factor_for_portfolio(alloc, crypto_tickers_set)
+            r = port_returns.get(disp, pd.Series(dtype=float))
             m = compute_metrics_from_returns(
                 r, dpy=dpy, rf_annual=rf_annual,
-                want_sortino=("Sortino" in risk_measures),
-                want_calmar=("Calmar" in risk_measures),
-                want_var=want_var, want_cvar=want_cvar, var_alpha=var_conf
+                want_sortino=want("Sortino"), want_calmar=want("Calmar"),
+                want_var=want("VaR (daily)"), want_cvar=want("CVaR (daily)"), var_alpha=var_conf
             )
-            metrics_dict[name] = m
-
+            metrics_dict[disp] = m
         metrics_df = pd.DataFrame(metrics_dict)
-        # réduire aux colonnes sélectionnées + basiques
-        cols_order = ["Annualized Return %","Cumulative Return %","Volatility %","Sharpe"]
+
+        # Ordre : Vol, MaxDD sous Vol, puis Sharpe, Sortino, Calmar, Var/CVar
+        cols_order = ["Annualized Return %","Cumulative Return %","Volatility %","Max Drawdown %","Sharpe"]
         if "Sortino" in risk_measures: cols_order.append("Sortino")
         if "Calmar" in risk_measures: cols_order.append("Calmar")
         if "VaR (daily)" in risk_measures: cols_order.append("VaR (daily)")
@@ -562,11 +621,28 @@ if st.button("🔎 Analyser"):
 
         st.markdown("### Comparaison de portefeuilles")
         st.dataframe(metrics_df, use_container_width=True, height=320)
-        st.caption(f"Rebalancing : **{rebal_mode}** | RF utilisé pour Sharpe/Sortino/Calmar : **{risk_free_rate_percent:.2f}%** (annualisé).")
+        st.caption(f"Rebalancing : **{rebal_mode}** | RF utilisé : **{risk_free_rate_percent:.2f}%** (annualisé).")
+
+        # Composition textuelle
+        def alloc_to_text(alloc):
+            items = []
+            for t, w in sorted(alloc.items(), key=lambda x: -x[1]):
+                if w <= 0: continue
+                items.append(f"{asset_names_map.get(t, t)} {w*100:.1f}%")
+            return ", ".join(items)
+
+        comp_lines = []
+        for key, alloc in portfolio_allocations.items():
+            disp = port_names_display.get(key, key)
+            comp_lines.append(f"<b>{disp}</b> : {alloc_to_text(alloc)}")
+        st.markdown("**Compositions :**<br>" + "<br>".join(comp_lines), unsafe_allow_html=True)
+
+        # Graph Perf des 3 portefeuilles
+        fig_ports = plot_portfolios_cum(port_returns, f"Performance cumulée des portefeuilles ({rebal_mode})")
+        st.plotly_chart(fig_ports, use_container_width=True)
 
         # ---------------- Export Excel & PDF --------------------------
         st.subheader("📥 Exporter les résultats")
-        # Excel
         perf_pct = (df_graph.ffill().bfill()/df_graph.ffill().bfill().iloc[0]-1)*100
         excel_buffer = io.BytesIO()
         with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
@@ -575,21 +651,25 @@ if st.button("🔎 Analyser"):
             metrics_df.to_excel(writer, sheet_name="Résumé Portefeuilles")
             gaps.to_excel(writer, sheet_name="Data Gaps", index=False)
         excel_buffer.seek(0)
-        st.download_button("📄 Télécharger les données & métriques (.xlsx)", data=excel_buffer, file_name="donnees_completes.xlsx")
+        st.download_button("📄 Télécharger les données & métriques (.xlsx)",
+                           data=excel_buffer, file_name="donnees_completes.xlsx")
 
-        # PDF (ReportLab)
         if include_pdf:
             charts_for_pdf = {
                 "Matrice de corrélation": fig_heat,
                 "Performances cumulées": fig_perf,
-                "Évolution (base 100)": fig_lines
+                "Évolution (base 100)": fig_lines,
+                "Perf relative vs benchmark": fig_rel,
+                "Portefeuilles (base 100)": fig_ports,
             }
-            pdf_buf = generate_pdf_report(company_name, logo_file, primary_color, secondary_color,
-                                          charts_for_pdf, metrics_df)
-            st.download_button("🖼️ Télécharger le rapport PDF", data=pdf_buf, file_name="rapport_portefeuille.pdf", mime="application/pdf")
+            # Composition en texte simple pour PDF (sans HTML)
+            comp_plain = [Paragraph(line.replace("<b>","").replace("</b>",""), getSampleStyleSheet()["BodyText"])
+                          for line in comp_lines]  # on passera mieux via generate_pdf_report
+            pdf_buf = generate_pdf_report(company_name, logo_file, charts_for_pdf, metrics_df, composition_lines=[l for l in [c.getPlainText() if hasattr(c,'getPlainText') else None for c in comp_plain] if l])
+            st.download_button("🖼️ Télécharger le rapport PDF",
+                               data=pdf_buf, file_name="rapport_portefeuille.pdf", mime="application/pdf")
 
-        # Note sur ^TNX
-        if "US 10Y Yield" in selected_comparisons or selected_asset == "US 10Y Yield":
+        if "US 10Y Yield" in selected_comparisons or benchmark_label == "US 10Y Yield":
             st.info("ℹ️ 'US 10Y Yield' (^TNX) est un rendement (pas un prix). Interpréter les comparaisons avec prudence.")
 
     except Exception as e:
