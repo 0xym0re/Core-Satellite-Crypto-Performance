@@ -561,9 +561,9 @@ with st.sidebar:
     rebal_mode = st.selectbox("Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"])
     freq_mode = st.radio(
     "Horloge de calcul (fréquence d'échantillonnage)",
-    ["Business days (252) — recommandé", "Hebdo (52)", "Calendarized (365) — expérimental"],
+    ["Daily", "Weekly"],
     index=0,
-    help="Utilise la même horloge pour tous les actifs avant de calculer les métriques."
+    help="Daily = jours ouvrés (252) ; Hebdo = clôture vendredi (52)."
 )
 
     risk_measures = st.multiselect("Mesures de risque à afficher",
@@ -607,8 +607,11 @@ def build_crypto_mapping_dynamic(min_mcap_usd=2e8, pages=4):
     return out
 
 st.markdown("## 💼 Composition du portefeuille crypto")
-use_dynamic_crypto = st.checkbox("Utiliser la liste crypto dynamique (mcap>200M)", value=True,
-                                 help="Récupère la liste via CoinGecko et vérifie la dispo sur Yahoo. Fallback : liste statique.")
+use_dynamic_crypto = st.checkbox(
+    "Utiliser la liste crypto dynamique (mcap>200M)",
+    value=False,
+    help="Récupère la liste via CoinGecko et vérifie la dispo sur Yahoo. Fallback : liste statique."
+)
 
 try:
     crypto_mapping = build_crypto_mapping_dynamic() if use_dynamic_crypto else crypto_static
@@ -693,50 +696,14 @@ def align_to_business_days(df):
 def align_to_weekly(df, rule="W-FRI"):
     return df.resample(rule).last().ffill()
 
-def calendarize_equities_to_365(df, crypto_set):
-    """
-    EXPÉRIMENTAL : transforme les prix en fréquence 'D' et 'répartit'
-    le log-retour Fri->Mon des actifs NON-crypto sur Sat/Sun/Mon (1/3 chacun).
-    """
-    dfD = df.resample("D").last().ffill()
-    out = {}
-    for c in dfD.columns:
-        p = dfD[c].astype(float)
-        lp = np.log(p)
-        lr = lp.diff()               # log-returns journaliers (0 le WE si pas de variation)
-        if c in crypto_set:
-            out[c] = lr
-            continue
-        # pour les non-crypto : répartir le log-retour cumulé Fri->Mon
-        wd = lr.index.weekday       # 0=Mon ... 6=Sun
-        is_mon = (wd == 0)
-        # log prix du dernier business day précédent (vendredi la plupart du temps)
-        prev_bus = df.resample("B").last().reindex(lr.index).ffill()
-        prev_bus_lp = np.log(prev_bus[c].astype(float))
-        # total Fri->Mon en log :
-        total_mon = (lp - prev_bus_lp).where(is_mon, 0.0)
-        # ajouter 1/3 Sam + 1/3 Dim + 1/3 Lundi en log
-        lr_cal = lr.copy()
-        # enlever le 'vrai' lundi, puis redistribuer
-        lr_cal[is_mon] = total_mon[is_mon] / 3.0
-        # samedi (5) & dimanche (6)
-        lr_cal[wd == 6] = total_mon.shift(-1)[wd == 6] / 3.0  # dimanche porte le lundi suivant
-        lr_cal[wd == 5] = total_mon.shift(-2)[wd == 5] / 3.0  # samedi porte le lundi suivant
-        out[c] = lr_cal
-    # revenir en prix pour compatibilité du reste de l’app
-    lr_df = pd.DataFrame(out)
-    prices = np.exp(lr_df.cumsum())
-    # rebase à 1 au début pour garder l'échelle relative ; on remettra l'échelle originale au besoin
-    prices = prices.div(prices.iloc[0]).mul(dfD.iloc[0])
-    return prices
 
 def normalize_clock(df, crypto_set, mode):
-    if mode.startswith("Business"):
+    if mode == "Daily":
         return align_to_business_days(df), 252
-    elif mode.startswith("Hebdo"):
+    elif mode == "Hebdo":
         return align_to_weekly(df), 52
-    else:
-        return calendarize_equities_to_365(df, crypto_set), 365
+    else:  # fallback sécurité
+        return align_to_business_days(df), 252
 
 # ----------------------------------------------------------------------------------------
 # ANALYSE
