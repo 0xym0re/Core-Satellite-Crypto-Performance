@@ -731,7 +731,7 @@ def generate_docx_report(company_name, logo_bytes, charts_dict, metrics_df, comp
     normal.font.size = Pt(10)
 
     # Title / Headings -> Calibri + PRIMARY
-    def _tune_style(name, size_pt, bold=True, color=secondary_rgb):
+    def _tune_style(name, size_pt, bold=True, color=primary_rgb):
         st = doc.styles[name]
         st.font.name = "Calibri"
         st._element.rPr.rFonts.set(qn('w:eastAsia'), 'Calibri')
@@ -740,7 +740,7 @@ def generate_docx_report(company_name, logo_bytes, charts_dict, metrics_df, comp
         st.font.color.rgb = color
 
     for sty, sz in (("Title", 24), ("Heading 1", 16), ("Heading 2", 13)):
-        _tune_style(sty, sz, True, primary_rgb)
+        _tune_style(sty, sz, True, secondary_rgb)
 
     # ---------- Titre + Logo ----------
     # Logo (au-dessus du titre, largeur 4.5 cm, ratio conservé par Word)
