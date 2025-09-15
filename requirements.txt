@@ -11,4 +11,3 @@ kaleido>=0.2.1        # export Plotly->PNG (même si tu as un fallback Matplotli
 reportlab>=3.6
 requests>=2.32          # NEW (CoinGecko)
 pillow>=10.3            # NEW (logo PDF, ratio)
-python-docx>=0.8.11
