@@ -16,7 +16,8 @@ import io, math, requests
 from datetime import timedelta
 import plotly.express as px
 import plotly.graph_objects as go
-import sys, subprocess
+import sys, subprocess, os, shutil,
+import plotly.io as pio
 import kaleido
 
 from reportlab.lib.pagesizes import A4
@@ -38,6 +39,79 @@ def ensure_kaleido() -> bool:
             return True
         except Exception:
             return False
+
+def _possible_chrome_paths():
+    # PATH binaries
+    names = ["google-chrome", "chrome", "chromium", "chromium-browser"]
+    for n in names:
+        p = shutil.which(n)
+        if p:
+            yield p
+    # Emplacements classiques
+    if sys.platform.startswith("win"):
+        for p in [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        ]:
+            if os.path.exists(p): yield p
+    elif sys.platform == "darwin":
+        p = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        if os.path.exists(p): yield p
+    else:
+        # linux containers fréquents
+        for p in ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
+            if os.path.exists(p): yield p
+
+def ensure_plotly_chrome(verbose=False) -> bool:
+    """
+    1) Cherche Chrome localement
+    2) Si absent, essaie l'installeur Plotly (CLI): plotly_get_chrome / plotly-get-chrome / python -m plotly get-chrome
+    3) Configure pio.kaleido.scope.chromium_executable + variables d'env
+    """
+    def _configure(path: str) -> bool:
+        if not path or not os.path.exists(path):
+            return False
+        os.environ["PLOTLY_CHROME"] = path   # reconnu par Plotly
+        os.environ["KAL_CHROME_PATH"] = path # pour certaines builds Kaleido
+        try:
+            # Certaines versions nécessitent de réinitialiser la scope
+            # (on la crée si elle n'existe pas encore)
+            _ = pio.kaleido.scope
+            pio.kaleido.scope.chromium_executable = path
+        except Exception:
+            pass
+        return True
+
+    # 1) déjà disponible ?
+    try:
+        exe = getattr(pio.kaleido.scope, "chromium_executable", None)
+        if exe and os.path.exists(exe):
+            return True
+    except Exception:
+        pass
+    for p in _possible_chrome_paths():
+        if _configure(p): 
+            if verbose: print(f"[plotly] Using Chrome at: {p}")
+            return True
+
+    # 2) tenter l'installation via la CLI plotly_get_chrome
+    cmds = [
+        ["plotly_get_chrome"],
+        ["plotly-get-chrome"],
+        [sys.executable, "-m", "plotly", "get-chrome"],
+    ]
+    for cmd in cmds:
+        try:
+            out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+            if verbose: print(out)
+            # après installation, re-scanne
+            for p in _possible_chrome_paths():
+                if _configure(p):
+                    return True
+        except Exception as e:
+            if verbose: print(f"[plotly] get-chrome attempt failed: {cmd} -> {e}")
+            continue
+    return False
 
 # --------------------------------------------------------------------
 # Charte graphique
@@ -345,16 +419,14 @@ def plot_portfolios_cum(nav_dict, title):
     return fig
 
 def fig_to_png_bytes(fig, scale=2):
-    # 1er essai : si Kaleido est déjà là
-    try:
-        return fig.to_image(format="png", scale=scale, engine="kaleido")
-    except Exception:
-        # Tentative d’installation à la volée
-        if ensure_kaleido():
-            # réessaye une fois
-            return fig.to_image(format="png", scale=scale, engine="kaleido")
-        # si toujours pas possible, on lève l’erreur pour la voir dans Streamlit
-        raise
+    # S'assure Kaleido + Chrome
+    if not ensure_kaleido():
+        raise RuntimeError("Kaleido introuvable et installation impossible.")
+    if not ensure_plotly_chrome():
+        raise RuntimeError("Google Chrome manquant. Échec de l'installation via plotly_get_chrome.")
+
+    # Export (engine=kaleido)
+    return fig.to_image(format="png", scale=scale, engine="kaleido")
 
 def build_crypto_sleeve_nav(df_prices, crypto_allocation_pairs, crypto_mapping):
     """
