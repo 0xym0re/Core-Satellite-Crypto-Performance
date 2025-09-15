@@ -688,7 +688,24 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
     buffer.seek(0)
     return buffer
 
+def _rgb_from_hex(hex_str):
+    from docx.shared import RGBColor
+    h = hex_str.lstrip("#")
+    return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+
+def _shade_cell(cell, hex_color):
+    # Remplit le fond d'une cellule (header de tableau) avec une couleur hex
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    tcPr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement('w:shd')
+    shd.set(qn('w:val'), 'clear')
+    shd.set(qn('w:color'), 'auto')
+    shd.set(qn('w:fill'), hex_color.lstrip('#').upper())
+    tcPr.append(shd)
+    
 def generate_docx_report(company_name, logo_bytes, charts_dict, metrics_df, composition_lines):
+    # Assure la dispo de python-docx
     ok = ensure_python_docx()
     if not ok:
         raise RuntimeError("Impossible d’installer python-docx (DOCX).")
@@ -696,9 +713,44 @@ def generate_docx_report(company_name, logo_bytes, charts_dict, metrics_df, comp
     from docx import Document
     from docx.shared import Cm, Pt
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+    from docx.oxml.ns import qn
+
+    primary_rgb = _rgb_from_hex(PRIMARY)
+    secondary_rgb = _rgb_from_hex(SECONDARY)
 
     doc = Document()
-    # Titre
+
+    # ---------- Styles globaux ----------
+    # Normal (texte) -> Calibri 10 pt
+    normal = doc.styles["Normal"]
+    normal.font.name = "Calibri"
+    # Astuce pour forcer Calibri partout (East Asia fallback)
+    normal._element.rPr.rFonts.set(qn('w:eastAsia'), 'Calibri')
+    normal.font.size = Pt(10)
+
+    # Title / Headings -> Calibri + PRIMARY
+    def _tune_style(name, size_pt, bold=True, color=secondary_rgb):
+        st = doc.styles[name]
+        st.font.name = "Calibri"
+        st._element.rPr.rFonts.set(qn('w:eastAsia'), 'Calibri')
+        st.font.size = Pt(size_pt)
+        st.font.bold = bold
+        st.font.color.rgb = color
+
+    for sty, sz in (("Title", 24), ("Heading 1", 16), ("Heading 2", 13)):
+        _tune_style(sty, sz, True, primary_rgb)
+
+    # ---------- Titre + Logo ----------
+    # Logo (au-dessus du titre, largeur 4.5 cm, ratio conservé par Word)
+    if logo_bytes:
+        try:
+            bio = io.BytesIO(logo_bytes); bio.seek(0)
+            doc.add_picture(bio, width=Cm(4.5))
+        except Exception:
+            pass
+            
     h = doc.add_heading(f"{company_name} — Portfolio Report", 0)
     h.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
@@ -725,15 +777,51 @@ def generate_docx_report(company_name, logo_bytes, charts_dict, metrics_df, comp
         cols = metrics_df.shape[1] + 1
         table = doc.add_table(rows=rows, cols=cols)
         table.style = "Table Grid"
-        # Header
-        table.cell(0,0).text = "Metric"
+        
+        # Header (fond SECONDARY + texte blanc, gras, centré)
+        hdr_cells = table.rows[0].cells
+        hdr_cells[0].text = "Metric"
         for j, col in enumerate(metrics_df.columns.tolist(), start=1):
-            table.cell(0,j).text = str(col)
-        # Rows
+            hdr_cells[j].text = str(col)
+            
+        for c in hdr_cells:
+            _shade_cell(c, SECONDARY)
+            # Applique blanc + gras + centré
+            for p in c.paragraphs:
+                p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+                for run in p.runs:
+                    run.font.bold = True
+                    run.font.color.rgb = _rgb_from_hex("#FFFFFF")
+                    run.font.name = "Calibri"
+                    run.font.size = Pt(10)
+
+        # Body
+        def _is_num(x):
+            try:
+                float(str(x).replace(",", "."))
+                return True
+            except Exception:
+                return False
+
         for i, (idx, row) in enumerate(metrics_df.iterrows(), start=1):
-            table.cell(i,0).text = str(idx)
+            # Colonne "Metric"
+            cell0 = table.cell(i, 0)
+            cell0.text = str(idx)
+            for p in cell0.paragraphs:
+                p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+                for run in p.runs:
+                    run.font.name = "Calibri"
+                    run.font.size = Pt(10)
+
+            # Valeurs
             for j, v in enumerate(row.values, start=1):
-                table.cell(i,j).text = "" if pd.isna(v) else str(v)
+                cell = table.cell(i, j)
+                cell.text = "" if pd.isna(v) else str(v)
+                for p in cell.paragraphs:
+                    p.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT if _is_num(v) else WD_PARAGRAPH_ALIGNMENT.LEFT
+                    for run in p.runs:
+                        run.font.name = "Calibri"
+                        run.font.size = Pt(10)
 
     # 2) Graphiques ensuite
     for name, fig_or_png in charts_dict.items():
