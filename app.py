@@ -44,6 +44,19 @@ def ensure_kaleido() -> bool:
         except Exception:
             return False
 
+def ensure_python_docx() -> bool:
+    """Installe python-docx si nécessaire (pour l'export Word)."""
+    try:
+        import docx  # noqa: F401
+        return True
+    except Exception:
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "python-docx"])
+            import docx  # noqa: F401
+            return True
+        except Exception:
+            return False
+
 def _to_bytes(uploaded_file):
     if not uploaded_file:
         return None
@@ -887,7 +900,7 @@ def align_to_weekly(df, rule="W-FRI"):
 def normalize_clock(df, crypto_set, mode):
     if mode == "Daily":
         return align_to_business_days(df), 252
-    elif mode == "Hebdo":
+    elif mode == "Weekly":
         return align_to_weekly(df), 52
     else:  # fallback sécurité
         return align_to_business_days(df), 252
