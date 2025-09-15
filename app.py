@@ -19,6 +19,7 @@ import plotly.graph_objects as go
 import sys, subprocess, os, shutil
 import plotly.io as pio
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors as rl_colors
@@ -60,6 +61,24 @@ SECONDARY = "#7CEF17"
 PERF_COLORS = ["#4E26DF","#7CEF17","#35434B","#B8A8F2","#C1E5F5","#C3F793",
                "#F2CFEE","#F2F2F2","#FCD9C4","#A7C7E7","#D4C2FC","#F9F6B2","#C4FCD2"]
 
+def _palette():
+    # Cyclique, commence par PRIMARY/SECONDARY puis autres teintes de la charte
+    seen = set()
+    base = [PRIMARY, SECONDARY] + [c for c in PERF_COLORS if c not in (PRIMARY, SECONDARY)]
+    out = []
+    for c in base:
+        if c not in seen:
+            out.append(c)
+            seen.add(c)
+    return out
+
+def _heatmap_cmap():
+    # Gradient charte : PRIMARY -> gris clair -> SECONDARY
+    try:
+        return LinearSegmentedColormap.from_list("cs_map", [PRIMARY, "#F2F2F2", SECONDARY], N=256)
+    except Exception:
+        return "viridis"
+        
 # ----------------------------------------------------------------------------------------
 # Mappings de base (fallback)
 # ----------------------------------------------------------------------------------------
@@ -448,7 +467,7 @@ def make_heatmap_png_mpl(df_prices, names_map, title):
     n, m = vals.shape
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    im = ax.imshow(vals, aspect='auto')
+    im = ax.imshow(vals, aspect='auto', cmap=_heatmap_cmap())
     ax.set_xticks(np.arange(m))
     ax.set_xticklabels(C.columns, rotation=45, ha='right', fontsize=8)
     ax.set_yticks(np.arange(n))
@@ -456,7 +475,7 @@ def make_heatmap_png_mpl(df_prices, names_map, title):
     for i in range(n):
         for j in range(m):
             ax.text(j, i, f"{vals[i, j]:.2f}", ha='center', va='center', fontsize=7)
-    ax.set_title(title)
+    ax.set_title(title, color="#222")
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     fig.tight_layout()
     return mpl_fig_to_png_bytes(fig)
@@ -466,11 +485,11 @@ def make_perf_bars_png_mpl(df_prices, names_map, title):
     perf = (df.iloc[-1] / df.iloc[0] - 1).sort_values(ascending=True) * 100.0
     labels = [names_map.get(k, k) for k in perf.index.tolist()]
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.barh(labels, perf.values)
+    ax.barh(labels, perf.values, color=PRIMARY)
     for i, v in enumerate(perf.values):
         ax.text(v + (0.3 if v >= 0 else -0.3), i, f"{v:.2f}%", va='center',
-                ha='left' if v >= 0 else 'right', fontsize=8)
-    ax.set_title(title)
+                ha='left' if v >= 0 else 'right', fontsize=8, color="#222")
+    ax.set_title(title, color="#222")
     ax.set_xlabel("Performance (%)")
     fig.tight_layout()
     return mpl_fig_to_png_bytes(fig)
@@ -479,9 +498,10 @@ def make_cumulative_lines_png_mpl(df_prices, names_map, title):
     D = df_prices.ffill().bfill()
     norm = D.divide(D.iloc[0]) * 100.0
     fig, ax = plt.subplots(figsize=(10, 5))
-    for col in norm.columns:
-        ax.plot(norm.index, norm[col], label=names_map.get(col, col))
-    ax.set_title(title)
+    pal = _palette()
+    for i, col in enumerate(norm.columns):
+        ax.plot(norm.index, norm[col], label=names_map.get(col, col), linewidth=1.8, color=pal[i % len(pal)])
+    ax.set_title(title, color="#222")
     ax.set_ylabel("Base 100")
     ax.legend(fontsize=8, ncol=3)
     fig.autofmt_xdate()
@@ -495,9 +515,12 @@ def make_relative_vs_benchmark_png_mpl(df_all, benchmark_ticker, names_map, titl
     bench = df[benchmark_ticker] / df[benchmark_ticker].iloc[0]
     rel = (df.divide(bench, axis=0) - 1.0) * 100.0
     fig, ax = plt.subplots(figsize=(10, 5))
+    pal = _palette()
+    idx = 0
     for col in [c for c in df.columns if c != benchmark_ticker]:
-        ax.plot(rel.index, rel[col], label=names_map.get(col, col))
-    ax.set_title(title)
+        ax.plot(rel.index, rel[col], label=names_map.get(col, col), linewidth=1.8, color=pal[idx % len(pal)])
+        idx += 1
+    ax.set_title(title, color="#222")
     ax.set_ylabel("Sur/ss perf vs benchmark (%)")
     ax.legend(fontsize=8, ncol=3)
     fig.autofmt_xdate()
@@ -506,18 +529,18 @@ def make_relative_vs_benchmark_png_mpl(df_all, benchmark_ticker, names_map, titl
 
 def make_portfolios_cum_png_mpl(nav_dict, title):
     fig, ax = plt.subplots(figsize=(10, 5))
-    for name, r in nav_dict.items():
+    pal = _palette()
+    for i, (name, r) in enumerate(nav_dict.items()):
         if r is None or r.empty:
             continue
         cum = (1 + r).cumprod() * 100.0
-        ax.plot(cum.index, cum.values, label=name)
-    ax.set_title(title)
+        ax.plot(cum.index, cum.values, label=name, linewidth=1.8, color=pal[i % len(pal)])
+    ax.set_title(title, color="#222")
     ax.set_ylabel("Base 100")
     ax.legend(fontsize=8, ncol=3)
     fig.autofmt_xdate()
     fig.tight_layout()
     return mpl_fig_to_png_bytes(fig)
-
 # ----------------------------------------------------------------------------------------
 # PDF report
 # ----------------------------------------------------------------------------------------
@@ -571,24 +594,6 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
             elements.append(Paragraph(line, normal))
         elements.append(Spacer(1, 0.2*cm))
 
-    # Graphiques
-    _ = ensure_kaleido()  # pré-check soft
-        # Graphiques (accepte soit des bytes PNG, soit des figures Plotly)
-    for name, fig_or_png in charts_dict.items():
-        try:
-            if isinstance(fig_or_png, (bytes, bytearray, memoryview)):
-                png_bytes = bytes(fig_or_png)
-            else:
-                # Dernier recours : essaye plotly->png (si kaleido dispo), sinon message dans le PDF
-                png_bytes = fig_to_png_bytes(fig_or_png, scale=2)
-            elements.append(Paragraph(name, h2))
-            elements.append(RLImage(io.BytesIO(png_bytes), width=17*cm, height=9*cm))
-            elements.append(Spacer(1, 0.3*cm))
-        except Exception as e:
-            elements.append(Paragraph(f"⚠️ Impossible d’exporter le graphique « {name} » : {str(e)}", normal))
-            elements.append(Spacer(1, 0.2*cm))
-
-
     # Tableau des métriques (header vert)
     if metrics_df is not None and not metrics_df.empty:
         elements.append(Paragraph("Portfolio Metrics", h2))
@@ -630,6 +635,25 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
         ]))
         elements.append(table)
 
+    
+    # Graphiques
+    _ = ensure_kaleido()  # pré-check soft
+        # Graphiques (accepte soit des bytes PNG, soit des figures Plotly)
+    for name, fig_or_png in charts_dict.items():
+        try:
+            if isinstance(fig_or_png, (bytes, bytearray, memoryview)):
+                png_bytes = bytes(fig_or_png)
+            else:
+                # Dernier recours : essaye plotly->png (si kaleido dispo), sinon message dans le PDF
+                png_bytes = fig_to_png_bytes(fig_or_png, scale=2)
+            elements.append(Paragraph(name, h2))
+            elements.append(RLImage(io.BytesIO(png_bytes), width=17*cm, height=9*cm))
+            elements.append(Spacer(1, 0.3*cm))
+        except Exception as e:
+            elements.append(Paragraph(f"⚠️ Impossible d’exporter le graphique « {name} » : {str(e)}", normal))
+            elements.append(Spacer(1, 0.2*cm))
+
+
     # Glossaire
     elements.append(PageBreak())
     elements.append(Paragraph("Glossaire des indicateurs de risque (*)", h2))
@@ -648,6 +672,73 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
     buffer.seek(0)
     return buffer
 
+def generate_docx_report(company_name, logo_bytes, charts_dict, metrics_df, composition_lines):
+    ok = ensure_python_docx()
+    if not ok:
+        raise RuntimeError("Impossible d’installer python-docx (DOCX).")
+
+    from docx import Document
+    from docx.shared import Cm, Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    doc = Document()
+    # Titre
+    h = doc.add_heading(f"{company_name} — Portfolio Report", 0)
+    h.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    # Logo
+    if logo_bytes:
+        try:
+            bio = io.BytesIO(logo_bytes); bio.seek(0)
+            doc.add_picture(bio, width=Cm(4.5))
+        except Exception:
+            pass
+
+    # Compositions
+    if composition_lines:
+        doc.add_heading("Compositions des portefeuilles", level=1)
+        for line in composition_lines:
+            p = doc.add_paragraph()
+            run = p.add_run(line)
+            run.font.size = Pt(10)
+
+    # 1) Metrics en premier
+    if metrics_df is not None and not metrics_df.empty:
+        doc.add_heading("Portfolio Metrics", level=1)
+        rows = metrics_df.shape[0] + 1
+        cols = metrics_df.shape[1] + 1
+        table = doc.add_table(rows=rows, cols=cols)
+        table.style = "Table Grid"
+        # Header
+        table.cell(0,0).text = "Metric"
+        for j, col in enumerate(metrics_df.columns.tolist(), start=1):
+            table.cell(0,j).text = str(col)
+        # Rows
+        for i, (idx, row) in enumerate(metrics_df.iterrows(), start=1):
+            table.cell(i,0).text = str(idx)
+            for j, v in enumerate(row.values, start=1):
+                table.cell(i,j).text = "" if pd.isna(v) else str(v)
+
+    # 2) Graphiques ensuite
+    for name, fig_or_png in charts_dict.items():
+        doc.add_heading(name, level=1)
+        try:
+            if isinstance(fig_or_png, (bytes, bytearray, memoryview)):
+                bio = io.BytesIO(bytes(fig_or_png)); bio.seek(0)
+                doc.add_picture(bio, width=Cm(17))
+            else:
+                # last resort (peu probable, on préfère PNG bytes déjà prêts)
+                _ = ensure_kaleido()
+                png = fig_to_png_bytes(fig_or_png, scale=2)
+                bio = io.BytesIO(png); bio.seek(0)
+                doc.add_picture(bio, width=Cm(17))
+        except Exception as e:
+            doc.add_paragraph(f"⚠️ Impossible d’insérer le graphique : {e}")
+
+    out = io.BytesIO()
+    doc.save(out)
+    out.seek(0)
+    return out
 # ----------------------------------------------------------------------------------------
 # UI : sidebar
 # ----------------------------------------------------------------------------------------
