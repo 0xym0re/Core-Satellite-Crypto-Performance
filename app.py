@@ -186,12 +186,6 @@ def download_prices(tickers, start, end):
 def is_crypto_ticker(t, crypto_set):
     return t in crypto_set
 
-def annualization_factor_for_portfolio(allocations, crypto_set):
-    for t, w in allocations.items():
-        if w > 0 and is_crypto_ticker(t, crypto_set):
-            return 365
-    return 252
-
 def renormalize_weights_if_needed(prices_df, allocations):
     tickers = [t for t in allocations if t in prices_df.columns]
     if not tickers: return {}, []
@@ -270,31 +264,43 @@ def compute_metrics_from_returns(r, dpy=252, rf_annual=0.0,
                                  want_sortino=True, want_calmar=True,
                                  want_var=False, want_cvar=False, var_alpha=0.95):
     if r is None or len(r) == 0: return {}
+
+    # Perf
     cum_ret = (1 + r).prod() - 1
-    ann_ret = (1 + cum_ret)**(dpy/len(r)) - 1 if len(r) > 0 else np.nan
-    vol = r.std() * np.sqrt(dpy)
-    excess = ann_ret - rf_annual
-    sharpe = excess/vol if vol and vol != 0 else np.nan
-    dd, max_dd = drawdown_stats(r)
-    calmar = (ann_ret/abs(max_dd)) if want_calmar and max_dd and max_dd != 0 else np.nan
+    cagr = (1 + cum_ret)**(dpy/len(r)) - 1
+
+    # Moyenne/vol par période -> annualisation 'classique'
+    mu_ann = r.mean() * dpy
+    vol_ann = r.std() * np.sqrt(dpy)
+
+    # Sharpe/Sortino
+    excess_mu = mu_ann - rf_annual
+    sharpe = excess_mu/vol_ann if vol_ann and vol_ann != 0 else np.nan
+
     sortino = np.nan
     if want_sortino:
         downside = r.copy(); downside[downside > 0] = 0
-        down_stdev = downside.std() * np.sqrt(dpy)
-        sortino = (excess/down_stdev) if down_stdev and down_stdev != 0 else np.nan
+        down_stdev_ann = downside.std() * np.sqrt(dpy)
+        sortino = (excess_mu/down_stdev_ann) if down_stdev_ann and down_stdev_ann != 0 else np.nan
+
+    # Drawdown & Calmar
+    dd, max_dd = drawdown_stats(r)
+    calmar = (cagr/abs(max_dd)) if want_calmar and max_dd and max_dd != 0 else np.nan
+
+    # VaR / CVaR (historiques) à la fréquence d'échantillonnage
     var_val = cvar_val = np.nan
     if want_var or want_cvar:
-        losses = -r.dropna()
-        if len(losses) > 0:
-            q = np.quantile(losses, var_alpha)
-            if want_var: var_val = q
-            if want_cvar:
-                tail = losses[losses >= q]
-                cvar_val = tail.mean() if len(tail) > 0 else q
+        q = np.quantile(-r.dropna(), var_alpha) if len(r.dropna())>0 else np.nan
+        if want_var:  var_val = q
+        if want_cvar:
+            tail = -r.dropna()
+            tail = tail[tail >= q]
+            cvar_val = tail.mean() if len(tail) > 0 else q
+
     return {
-        "Annualized Return %": round(ann_ret*100, 2),
+        "Annualized Return %": round(cagr*100, 2),
         "Cumulative Return %": round(cum_ret*100, 2),
-        "Volatility %": round(vol*100, 2),
+        "Volatility %": round(vol_ann*100, 2),
         "Max Drawdown %": round(max_dd*100, 2) if pd.notna(max_dd) else np.nan,
         "Sharpe": round(sharpe, 2),
         "Sortino": round(sortino, 2) if pd.notna(sortino) else np.nan,
@@ -553,6 +559,13 @@ with st.sidebar:
     st.header("Paramètres")
     risk_free_rate_percent = st.number_input("Taux sans risque annuel (%)", -5.0, 20.0, 0.0, 0.1)
     rebal_mode = st.selectbox("Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"])
+    freq_mode = st.radio(
+    "Horloge de calcul (fréquence d'échantillonnage)",
+    ["Business days (252) — recommandé", "Hebdo (52)", "Calendarized (365) — expérimental"],
+    index=0,
+    help="Utilise la même horloge pour tous les actifs avant de calculer les métriques."
+)
+
     risk_measures = st.multiselect("Mesures de risque à afficher",
                                    ["Sharpe","Sortino","Calmar","VaR (daily)","CVaR (daily)"],
                                    default=["Sharpe","Sortino","Calmar"])
@@ -673,6 +686,58 @@ safe_default = [a for a in preselect if a in compare_assets]
 selected_comparisons = st.multiselect("📊 Actifs à comparer :", compare_assets, default=safe_default)
 compare_tickers = [full_asset_mapping[a] for a in selected_comparisons if a in full_asset_mapping]
 
+def align_to_business_days(df):
+    # prend la dernière quote de chaque jour ouvré puis ffill (jours fériés inclus)
+    return df.resample("B").last().ffill()
+
+def align_to_weekly(df, rule="W-FRI"):
+    return df.resample(rule).last().ffill()
+
+def calendarize_equities_to_365(df, crypto_set):
+    """
+    EXPÉRIMENTAL : transforme les prix en fréquence 'D' et 'répartit'
+    le log-retour Fri->Mon des actifs NON-crypto sur Sat/Sun/Mon (1/3 chacun).
+    """
+    dfD = df.resample("D").last().ffill()
+    out = {}
+    for c in dfD.columns:
+        p = dfD[c].astype(float)
+        lp = np.log(p)
+        lr = lp.diff()               # log-returns journaliers (0 le WE si pas de variation)
+        if c in crypto_set:
+            out[c] = lr
+            continue
+        # pour les non-crypto : répartir le log-retour cumulé Fri->Mon
+        wd = lr.index.weekday       # 0=Mon ... 6=Sun
+        is_mon = (wd == 0)
+        # log prix du dernier business day précédent (vendredi la plupart du temps)
+        prev_bus = df.resample("B").last().reindex(lr.index).ffill()
+        prev_bus_lp = np.log(prev_bus[c].astype(float))
+        # total Fri->Mon en log :
+        total_mon = (lp - prev_bus_lp).where(is_mon, 0.0)
+        # ajouter 1/3 Sam + 1/3 Dim + 1/3 Lundi en log
+        lr_cal = lr.copy()
+        # enlever le 'vrai' lundi, puis redistribuer
+        lr_cal[is_mon] = total_mon[is_mon] / 3.0
+        # samedi (5) & dimanche (6)
+        lr_cal[wd == 6] = total_mon.shift(-1)[wd == 6] / 3.0  # dimanche porte le lundi suivant
+        lr_cal[wd == 5] = total_mon.shift(-2)[wd == 5] / 3.0  # samedi porte le lundi suivant
+        out[c] = lr_cal
+    # revenir en prix pour compatibilité du reste de l’app
+    lr_df = pd.DataFrame(out)
+    prices = np.exp(lr_df.cumsum())
+    # rebase à 1 au début pour garder l'échelle relative ; on remettra l'échelle originale au besoin
+    prices = prices.div(prices.iloc[0]).mul(dfD.iloc[0])
+    return prices
+
+def normalize_clock(df, crypto_set, mode):
+    if mode.startswith("Business"):
+        return align_to_business_days(df), 252
+    elif mode.startswith("Hebdo"):
+        return align_to_weekly(df), 52
+    else:
+        return calendarize_equities_to_365(df, crypto_set), 365
+
 # ----------------------------------------------------------------------------------------
 # ANALYSE
 # ----------------------------------------------------------------------------------------
@@ -693,7 +758,9 @@ if st.button("🔎 Analyser"):
             start_date = end_date - pd.Timedelta(days=nb_days - 1)
 
         # Data
-        df = download_prices(tickers_dl, start_date, end_date)
+        df_raw = download_prices(tickers_dl, start_date, end_date)
+        df, dpy_global = normalize_clock(df_raw, crypto_tickers_set, freq_mode)
+
         traditional_tickers = [t for t in traditional_tickers_set if t in df.columns]
         if traditional_tickers:
             df[traditional_tickers] = df[traditional_tickers].ffill().bfill()
@@ -745,10 +812,9 @@ if st.button("🔎 Analyser"):
         metrics_dict = {}
         for key, alloc in portfolio_allocations.items():
             disp = port_names_display.get(key, key)
-            dpy = annualization_factor_for_portfolio(alloc, crypto_tickers_set)
             r = port_returns.get(disp, pd.Series(dtype=float))
             m = compute_metrics_from_returns(
-                r, dpy=dpy, rf_annual=rf_annual,
+                r, dpy=dpy_global, rf_annual=rf_annual,
                 want_sortino=want("Sortino"), want_calmar=want("Calmar"),
                 want_var=want("VaR (daily)"), want_cvar=want("CVaR (daily)"), var_alpha=var_conf
             )
