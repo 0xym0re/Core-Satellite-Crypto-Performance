@@ -113,6 +113,16 @@ def ensure_plotly_chrome(verbose=False) -> bool:
             continue
     return False
 
+    def _to_bytes(uploaded_file):
+    if not uploaded_file:
+        return None
+    try:
+        uploaded_file.seek(0)
+    except Exception:
+        pass
+    return uploaded_file.read()
+
+
 # --------------------------------------------------------------------
 # Charte graphique
 PRIMARY = "#4E26DF"
@@ -860,36 +870,80 @@ if st.button("🔎 Analyser"):
         st.plotly_chart(fig_ports, use_container_width=True)
 
         # ---------------- Export Excel & PDF --------------------------
-        st.subheader("📥 Exporter les résultats")
-        perf_pct = (df_graph.ffill().bfill()/df_graph.ffill().bfill().iloc[0]-1)*100
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-            df.rename(columns=asset_names_map).to_excel(writer, sheet_name="Prix")
-            perf_pct.rename(columns=asset_names_map).to_excel(writer, sheet_name="Performance (%)")
-            metrics_df.to_excel(writer, sheet_name="Résumé Portefeuilles")
-            gaps.to_excel(writer, sheet_name="Data Gaps", index=False)
-        excel_buffer.seek(0)
-        st.download_button("📄 Télécharger les données & métriques (.xlsx)",
-                           data=excel_buffer, file_name="donnees_completes.xlsx")
+st.subheader("📥 Exporter les résultats")
 
-        if include_pdf:
-            charts_for_pdf = {
-                "Matrice de corrélation": fig_heat,
-                "Performances cumulées": fig_perf,
-                "Évolution (base 100)": fig_lines,
-                "Perf relative vs benchmark": fig_rel,
-                "Portefeuilles (base 100)": fig_ports,
-            }
-            # Composition en texte simple pour PDF (sans HTML)
-            comp_plain = [Paragraph(line.replace("<b>","").replace("</b>",""), getSampleStyleSheet()["BodyText"])
-                          for line in comp_lines]  # on passera mieux via generate_pdf_report
-            pdf_buf = generate_pdf_report(company_name, logo_file, charts_for_pdf, metrics_df, composition_lines=[l for l in [c.getPlainText() if hasattr(c,'getPlainText') else None for c in comp_plain] if l])
-            st.download_button("🖼️ Télécharger le rapport PDF",
-                               data=pdf_buf, file_name="rapport_portefeuille.pdf", mime="application/pdf")
+# On prépare tout ce qu'il faut pour exporter, et on le persiste.
+perf_pct = (df_graph.ffill().bfill()/df_graph.ffill().bfill().iloc[0]-1)*100
+
+charts_for_pdf = {
+    "Matrice de corrélation": fig_heat,
+    "Performances cumulées": fig_perf,
+    "Évolution (base 100)": fig_lines,
+    "Perf relative vs benchmark": fig_rel,
+    "Portefeuilles (base 100)": fig_ports,
+}
+# Composition en texte simple pour PDF (sans HTML)
+comp_plain = [
+    Paragraph(line.replace("<b>","").replace("</b>",""), getSampleStyleSheet()["BodyText"]).getPlainText()
+    for line in comp_lines
+]
+
+st.session_state["export_payload"] = {
+    "df_graph": df_graph,                       # prix des tickers choisis (index date)
+    "perf_pct": perf_pct,                       # perfs cumulées en %
+    "metrics_df": metrics_df,                   # tableau des métriques
+    "gaps": gaps,                               # contrôle qualité data
+    "charts_for_pdf": charts_for_pdf,           # figures Plotly
+    "comp_lines_plain": comp_plain,             # compositions en texte simple
+    "company_name": company_name,
+    "logo_bytes": _to_bytes(logo_file),         # bytes du logo (optionnel)
+}
+st.success("Résultats prêts pour export (Excel / PDF) dans la section en bas de page.")
+
 
         if "US 10Y Yield" in selected_comparisons or benchmark_label == "US 10Y Yield":
             st.info("ℹ️ 'US 10Y Yield' (^TNX) est un rendement (pas un prix). Interpréter les comparaisons avec prudence.")
 
+
+# ================== ZONE EXPORT PERSISTANTE ==================
+if "export_payload" in st.session_state:
+    payload = st.session_state["export_payload"]
+
+    st.markdown("---")
+    st.subheader("📥 Exporter les résultats")
+
+    # --- Excel ---
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+        # On renomme les colonnes à l'export (tickers -> noms)
+        payload["df_graph"].rename(columns=asset_names_map).to_excel(writer, sheet_name="Prix")
+        payload["perf_pct"].rename(columns=asset_names_map).to_excel(writer, sheet_name="Performance (%)")
+        payload["metrics_df"].to_excel(writer, sheet_name="Résumé Portefeuilles")
+        payload["gaps"].to_excel(writer, sheet_name="Data Gaps", index=False)
+    excel_buffer.seek(0)
+    st.download_button("📄 Télécharger les données & métriques (.xlsx)",
+                       data=excel_buffer, file_name="donnees_completes.xlsx")
+
+    # --- PDF ---
+    if include_pdf:
+        # 1 clic pour générer le PDF, puis un bouton de téléchargement qui persiste
+        gen_pdf = st.button("🖼️ Générer le rapport PDF", key="gen_pdf")
+        if gen_pdf:
+            logo_io = io.BytesIO(payload["logo_bytes"]) if payload["logo_bytes"] else None
+            pdf_buf = generate_pdf_report(
+                payload["company_name"],
+                logo_io,
+                payload["charts_for_pdf"],
+                payload["metrics_df"],
+                composition_lines=payload["comp_lines_plain"]
+            )
+            st.session_state["pdf_bytes"] = pdf_buf.getvalue()
+
+        if "pdf_bytes" in st.session_state:
+            st.download_button("⬇️ Télécharger le rapport PDF",
+                               data=st.session_state["pdf_bytes"],
+                               file_name="rapport_portefeuille.pdf",
+                               mime="application/pdf")
         # ---------------- Notes / Glossaire risques -------------------
         st.markdown("---")
         st.markdown("### ℹ️ Notes sur les indicateurs de risque (*)")
