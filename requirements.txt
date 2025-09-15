@@ -1,12 +1,14 @@
 streamlit>=1.34
 yfinance>=0.2.40
+lxml>=4.9.3           # requis par yfinance sur certaines versions
 pandas>=2.2
 numpy>=1.26
 matplotlib>=3.8
 seaborn>=0.13
 xlsxwriter>=3.2
 plotly>=5.22
-kaleido>=0.2.1
+kaleido>=0.2.1        # export Plotly->PNG (même si tu as un fallback Matplotlib)
 reportlab>=3.6
 requests>=2.32          # NEW (CoinGecko)
 pillow>=10.3            # NEW (logo PDF, ratio)
+python-docx>=0.8.11
