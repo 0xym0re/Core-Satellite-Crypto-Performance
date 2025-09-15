@@ -27,6 +27,18 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import PageBreak
 from PIL import Image as PILImage
 
+def ensure_kaleido() -> bool:
+    try:
+        import kaleido  # noqa: F401
+        return True
+    except Exception:
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "kaleido"])
+            import kaleido  # noqa: F401
+            return True
+        except Exception:
+            return False
+
 # --------------------------------------------------------------------
 # Charte graphique
 PRIMARY = "#4E26DF"
