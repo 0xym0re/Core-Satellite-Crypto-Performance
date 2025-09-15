@@ -18,7 +18,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import sys, subprocess, os, shutil
 import plotly.io as pio
-import kaleido
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors as rl_colors
@@ -921,45 +920,45 @@ if st.button("🔎 Analyser"):
             "- **CVaR*** (ou Expected Shortfall) : **perte moyenne** conditionnelle au-delà de la VaR (mesure la gravité des pires jours)."
         )
 
-# ================== ZONE EXPORT PERSISTANTE ==================
-if "export_payload" in st.session_state:
-    payload = st.session_state["export_payload"]
+        # ================== ZONE EXPORT PERSISTANTE ==================
+    if "export_payload" in st.session_state:
+        payload = st.session_state["export_payload"]
 
-    st.markdown("---")
-    st.subheader("📥 Exporter les résultats")
+        st.markdown("---")
+        st.subheader("📥 Exporter les résultats")
 
-    # --- Excel ---
-    excel_buffer = io.BytesIO()
-    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-        # On renomme les colonnes à l'export (tickers -> noms)
-        payload["df_graph"].rename(columns=asset_names_map).to_excel(writer, sheet_name="Prix")
-        payload["perf_pct"].rename(columns=asset_names_map).to_excel(writer, sheet_name="Performance (%)")
-        payload["metrics_df"].to_excel(writer, sheet_name="Résumé Portefeuilles")
-        payload["gaps"].to_excel(writer, sheet_name="Data Gaps", index=False)
-    excel_buffer.seek(0)
-    st.download_button("📄 Télécharger les données & métriques (.xlsx)",
-                       data=excel_buffer, file_name="donnees_completes.xlsx")
+        # --- Excel ---
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+            # On renomme les colonnes à l'export (tickers -> noms)
+            payload["df_graph"].rename(columns=asset_names_map).to_excel(writer, sheet_name="Prix")
+            payload["perf_pct"].rename(columns=asset_names_map).to_excel(writer, sheet_name="Performance (%)")
+            payload["metrics_df"].to_excel(writer, sheet_name="Résumé Portefeuilles")
+            payload["gaps"].to_excel(writer, sheet_name="Data Gaps", index=False)
+        excel_buffer.seek(0)
+        st.download_button("📄 Télécharger les données & métriques (.xlsx)",
+                           data=excel_buffer, file_name="donnees_completes.xlsx")
 
-    # --- PDF ---
-    if include_pdf:
-        # 1 clic pour générer le PDF, puis un bouton de téléchargement qui persiste
-        gen_pdf = st.button("🖼️ Générer le rapport PDF", key="gen_pdf")
-        if gen_pdf:
-            logo_io = io.BytesIO(payload["logo_bytes"]) if payload["logo_bytes"] else None
-            pdf_buf = generate_pdf_report(
-                payload["company_name"],
-                logo_io,
-                payload["charts_for_pdf"],
-                payload["metrics_df"],
-                composition_lines=payload["comp_lines_plain"]
-            )
-            st.session_state["pdf_bytes"] = pdf_buf.getvalue()
+        # --- PDF ---
+        if include_pdf:
+            # 1 clic pour générer le PDF, puis un bouton de téléchargement qui persiste
+            gen_pdf = st.button("🖼️ Générer le rapport PDF", key="gen_pdf")
+            if gen_pdf:
+                logo_io = io.BytesIO(payload["logo_bytes"]) if payload["logo_bytes"] else None
+                pdf_buf = generate_pdf_report(
+                    payload["company_name"],
+                    logo_io,
+                    payload["charts_for_pdf"],
+                    payload["metrics_df"],
+                    composition_lines=payload["comp_lines_plain"]
+                )
+                st.session_state["pdf_bytes"] = pdf_buf.getvalue()
 
-        if "pdf_bytes" in st.session_state:
-            st.download_button("⬇️ Télécharger le rapport PDF",
-                               data=st.session_state["pdf_bytes"],
-                               file_name="rapport_portefeuille.pdf",
-                               mime="application/pdf")
+            if "pdf_bytes" in st.session_state:
+                st.download_button("⬇️ Télécharger le rapport PDF",
+                                   data=st.session_state["pdf_bytes"],
+                                   file_name="rapport_portefeuille.pdf",
+                                   mime="application/pdf")
 
     
     except Exception as e:
