@@ -16,6 +16,7 @@ import io, math, requests
 from datetime import timedelta
 import plotly.express as px
 import plotly.graph_objects as go
+import sys, subprocess
 import kaleido
 
 from reportlab.lib.pagesizes import A4
@@ -332,7 +333,16 @@ def plot_portfolios_cum(nav_dict, title):
     return fig
 
 def fig_to_png_bytes(fig, scale=2):
-    return fig.to_image(format="png", scale=scale)
+    # 1er essai : si Kaleido est déjà là
+    try:
+        return fig.to_image(format="png", scale=scale, engine="kaleido")
+    except Exception:
+        # Tentative d’installation à la volée
+        if ensure_kaleido():
+            # réessaye une fois
+            return fig.to_image(format="png", scale=scale, engine="kaleido")
+        # si toujours pas possible, on lève l’erreur pour la voir dans Streamlit
+        raise
 
 def build_crypto_sleeve_nav(df_prices, crypto_allocation_pairs, crypto_mapping):
     """
@@ -408,7 +418,8 @@ def keep_aspect_image(file_like, target_width_cm):
 
 def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, composition_lines):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm,
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+                            leftMargin=1.5*cm, rightMargin=1.5*cm,
                             topMargin=1.2*cm, bottomMargin=1.2*cm)
     elements = []
 
@@ -417,78 +428,74 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
     h2 = styles["Heading2"]
     normal = styles["BodyText"]
 
-    # Styles de cellules (pour le tableau avec word-wrap)
-    cell_left = ParagraphStyle(
-        "cell_left", parent=normal, fontSize=9, leading=11, spaceAfter=0,
-        wordWrap="CJK", alignment=0  # LEFT
-    )
-    cell_right = ParagraphStyle(
-        "cell_right", parent=normal, fontSize=9, leading=11, spaceAfter=0,
-        wordWrap="CJK", alignment=2  # RIGHT
-    )
+    # Styles de cellules avec word-wrap
+    cell_left = ParagraphStyle("cell_left", parent=normal, fontSize=9, leading=11,
+                               spaceAfter=0, wordWrap="CJK", alignment=0)
+    cell_right = ParagraphStyle("cell_right", parent=normal, fontSize=9, leading=11,
+                                spaceAfter=0, wordWrap="CJK", alignment=2)
 
-    # Header : logo + titre
+    # --- Header : logo + titre
     if logo_file is not None:
         try:
+            logo_file.seek(0)
             logo_buf = io.BytesIO(logo_file.read())
             logo_img = keep_aspect_image(logo_buf, target_width_cm=4.5)
             elements.append(logo_img)
             elements.append(Spacer(1, 0.2*cm))
         except Exception:
             pass
-
     elements.append(Paragraph(f"{company_name} — Portfolio Report", title_style))
     elements.append(Spacer(1, 0.3*cm))
 
-    # Compositions (texte simple)
+    # --- Compositions
     if composition_lines:
         elements.append(Paragraph("Compositions des portefeuilles", h2))
         for line in composition_lines:
             elements.append(Paragraph(line, normal))
         elements.append(Spacer(1, 0.2*cm))
 
-    # Graphiques (tous ceux fournis par charts_dict)
+    # --- Graphiques
+    # Tente un pré-check Kaleido pour éviter une boucle d'échecs silencieux
+    kaleido_ok = ensure_kaleido()
     for name, fig in charts_dict.items():
         try:
-            png = fig_to_png_bytes(fig, scale=2)
+            png = fig_to_png_bytes(fig, scale=2)  # lèvera si impossible
             elements.append(Paragraph(name, h2))
             elements.append(RLImage(io.BytesIO(png), width=17*cm, height=9*cm))
             elements.append(Spacer(1, 0.3*cm))
-        except Exception:
-            continue
+        except Exception as e:
+            # on laisse une trace visible dans le PDF
+            elements.append(Paragraph(f"⚠️ Impossible d’exporter le graphique « {name} » : {str(e)}", normal))
+            elements.append(Spacer(1, 0.2*cm))
 
-    # Tableau des métriques : colonnes plus larges + wrap automatique
+    # --- Tableau des métriques (header vert + wrap)
     if metrics_df is not None and not metrics_df.empty:
         elements.append(Paragraph("Portfolio Metrics", h2))
 
         df = metrics_df.copy()
-        # Construire data = header + rows avec Paragraphs (wrap)
         header_cells = [Paragraph("Metric", cell_left)] + \
                        [Paragraph(str(c), cell_left) for c in df.columns.tolist()]
         data = [header_cells]
-
         for idx, row in df.iterrows():
             row_cells = [Paragraph(str(idx), cell_left)]
             for v in row.values:
                 txt = "" if pd.isna(v) else str(v)
-                # Aligner à droite les nombres, à gauche le reste
+                # aligner à droite si nombre
                 try:
-                    # Si convertible en float → droite
                     _ = float(str(v).replace(",", "."))
                     row_cells.append(Paragraph(txt, cell_right))
                 except Exception:
                     row_cells.append(Paragraph(txt, cell_left))
             data.append(row_cells)
 
-        # Largeurs de colonnes dynamiques selon la page
         avail_w = A4[0] - doc.leftMargin - doc.rightMargin
         first_w = 0.35 * avail_w
-        other_w = (avail_w - first_w) / max(1, (len(df.columns)))
+        other_w = (avail_w - first_w) / max(1, len(df.columns))
         col_widths = [first_w] + [other_w]*len(df.columns)
 
         table = Table(data, repeatRows=1, colWidths=col_widths)
         table.setStyle(TableStyle([
-            ('BACKGROUND',(0,0),(-1,0), rl_colors.HexColor(PRIMARY)),
+            ('BACKGROUND',(0,0),(-1,0), rl_colors.HexColor(SECONDARY)),  # <<< vert de la charte
             ('TEXTCOLOR',(0,0),(-1,0), rl_colors.white),
             ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
             ('FONTSIZE',(0,0),(-1,0),10),
@@ -496,7 +503,8 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
             ('ALIGN',(1,1),(-1,-1),'RIGHT'),
             ('ALIGN',(0,0),(0,-1),'LEFT'),
             ('GRID',(0,0),(-1,-1),0.3, rl_colors.HexColor("#DDDDDD")),
-            ('ROWBACKGROUNDS',(0,1),(-1,-1), [rl_colors.whitesmoke, rl_colors.HexColor("#F7F7F7")]),
+            ('ROWBACKGROUNDS',(0,1),(-1,-1),
+                [rl_colors.whitesmoke, rl_colors.HexColor("#F7F7F7")]),
             ('BOTTOMPADDING',(0,0),(-1,0),6),
             ('TOPPADDING',(0,0),(-1,0),6),
             ('LEFTPADDING',(0,0),(-1,-1),4),
@@ -504,10 +512,10 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
         ]))
         elements.append(table)
 
-    # Glossaire en fin de rapport
+    # --- Glossaire
     elements.append(PageBreak())
     elements.append(Paragraph("Glossaire des indicateurs de risque (*)", h2))
-    gloss_lines = [
+    for line in [
         "<b>Volatilité*</b> : écart-type des rendements journaliers, annualisé (base 252).",
         "<b>Max Drawdown*</b> : pire baisse (pic-creux) cumulée sur la période.",
         "<b>Sharpe*</b> : (Rendement annualisé − Taux sans risque) / Volatilité.",
@@ -515,14 +523,12 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
         "<b>Calmar*</b> : Rendement annualisé / |Max Drawdown|.",
         "<b>VaR (historique, daily)*</b> : perte seuil, dépassée dans (1−α) des cas.",
         "<b>CVaR (Expected Shortfall)*</b> : perte moyenne conditionnelle au-delà de la VaR.",
-    ]
-    for line in gloss_lines:
+    ]:
         elements.append(Paragraph(line, normal))
 
     doc.build(elements)
     buffer.seek(0)
     return buffer
-
 
 # ------------------ UI : sidebar -------------------------------------
 with st.sidebar:
