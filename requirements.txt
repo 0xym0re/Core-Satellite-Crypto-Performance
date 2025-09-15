@@ -8,3 +8,5 @@ xlsxwriter>=3.2
 plotly>=5.22
 kaleido>=0.2.1
 reportlab>=3.6
+requests>=2.32          # NEW (CoinGecko)
+pillow>=10.3            # NEW (logo PDF, ratio)
