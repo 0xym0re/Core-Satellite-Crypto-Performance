@@ -114,13 +114,13 @@ def ensure_plotly_chrome(verbose=False) -> bool:
     return False
 
     def _to_bytes(uploaded_file):
-    if not uploaded_file:
-        return None
-    try:
-        uploaded_file.seek(0)
-    except Exception:
-        pass
-    return uploaded_file.read()
+        if not uploaded_file:
+            return None
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
+        return uploaded_file.read()
 
 
 # --------------------------------------------------------------------
