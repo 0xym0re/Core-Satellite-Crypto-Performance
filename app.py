@@ -16,7 +16,7 @@ import io, math, requests
 from datetime import timedelta
 import plotly.express as px
 import plotly.graph_objects as go
-import sys, subprocess, os, shutil,
+import sys, subprocess, os, shutil
 import plotly.io as pio
 import kaleido
 
