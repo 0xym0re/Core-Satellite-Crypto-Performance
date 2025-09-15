@@ -16,6 +16,7 @@ import io, math, requests
 from datetime import timedelta
 import plotly.express as px
 import plotly.graph_objects as go
+import kaleido
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors as rl_colors
