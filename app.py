@@ -21,7 +21,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors as rl_colors
 from reportlab.lib.units import cm
 from reportlab.platypus import Table, TableStyle, Paragraph, SimpleDocTemplate, Image as RLImage, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import PageBreak
 from PIL import Image as PILImage
 
 # --------------------------------------------------------------------
@@ -332,6 +333,64 @@ def plot_portfolios_cum(nav_dict, title):
 def fig_to_png_bytes(fig, scale=2):
     return fig.to_image(format="png", scale=scale)
 
+def build_crypto_sleeve_nav(df_prices, crypto_allocation_pairs, crypto_mapping):
+    """
+    Construit la NAV (base 1.0) de la poche crypto pondérée selon la répartition choisie.
+    On combine les rendements journaliers des tickers crypto sélectionnés.
+    """
+    if not crypto_allocation_pairs:
+        return pd.Series(dtype=float)
+
+    # Normalisation des poids à 100% (tolérant si la somme != 100)
+    total_pct = sum(p for _, p in crypto_allocation_pairs) or 0.0
+    if total_pct <= 0:
+        return pd.Series(dtype=float)
+
+    tw = []
+    for name, pct in crypto_allocation_pairs:
+        t = crypto_mapping.get(name)
+        if t in df_prices.columns and pct > 0:
+            tw.append((t, pct / total_pct))
+    if not tw:
+        return pd.Series(dtype=float)
+
+    P = df_prices[[t for t, _ in tw]].copy().ffill().bfill()
+    R = P.pct_change().dropna()
+    w = np.array([w for _, w in tw], dtype=float)
+    sleeve_r = (R * w).sum(axis=1)
+    nav = (1.0 + sleeve_r).cumprod()
+    nav.index = R.index
+    return nav
+
+
+def plot_crypto_sleeve_vs_benchmark(df_all, benchmark_ticker, sleeve_nav, names_map, title):
+    """
+    Trace la sur/sous-perf (%) de la poche crypto (seule) vs le benchmark.
+    """
+    df = df_all.ffill().bfill()
+    if sleeve_nav is None or sleeve_nav.empty or benchmark_ticker not in df.columns:
+        return go.Figure()
+
+    # Aligner les dates sur la NAV de la poche
+    bench = df[benchmark_ticker].reindex(sleeve_nav.index).dropna()
+    sleeve_nav = sleeve_nav.reindex(bench.index).dropna()
+    if sleeve_nav.empty or bench.empty:
+        return go.Figure()
+
+    bench_norm = bench / bench.iloc[0]
+    sleeve_norm = sleeve_nav / sleeve_nav.iloc[0]
+    rel = (sleeve_norm / bench_norm - 1.0) * 100.0
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=rel.index, y=rel, mode='lines',
+                             name="Poche Crypto (pondérée)"))
+    fig.update_layout(title=title,
+                      xaxis_title="", yaxis_title="Sur/ss perf vs benchmark (%)",
+                      legend=dict(orientation="h", y=-0.2),
+                      margin=dict(l=20, r=20, t=60, b=60),
+                      template="plotly_white")
+    return fig
+
 # ------------------ PDF report ---------------------------------------
 def keep_aspect_image(file_like, target_width_cm):
     try:
@@ -351,31 +410,43 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
     doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm,
                             topMargin=1.2*cm, bottomMargin=1.2*cm)
     elements = []
+
     styles = getSampleStyleSheet()
     title_style = styles["Title"]
     h2 = styles["Heading2"]
     normal = styles["BodyText"]
 
+    # Styles de cellules (pour le tableau avec word-wrap)
+    cell_left = ParagraphStyle(
+        "cell_left", parent=normal, fontSize=9, leading=11, spaceAfter=0,
+        wordWrap="CJK", alignment=0  # LEFT
+    )
+    cell_right = ParagraphStyle(
+        "cell_right", parent=normal, fontSize=9, leading=11, spaceAfter=0,
+        wordWrap="CJK", alignment=2  # RIGHT
+    )
+
     # Header : logo + titre
     if logo_file is not None:
         try:
             logo_buf = io.BytesIO(logo_file.read())
-            logo_img = keep_aspect_image(logo_buf, target_width_cm=4.5)  # largeur ~4.5cm
+            logo_img = keep_aspect_image(logo_buf, target_width_cm=4.5)
             elements.append(logo_img)
             elements.append(Spacer(1, 0.2*cm))
         except Exception:
             pass
+
     elements.append(Paragraph(f"{company_name} — Portfolio Report", title_style))
     elements.append(Spacer(1, 0.3*cm))
 
-    # Compositions
+    # Compositions (texte simple)
     if composition_lines:
         elements.append(Paragraph("Compositions des portefeuilles", h2))
         for line in composition_lines:
             elements.append(Paragraph(line, normal))
         elements.append(Spacer(1, 0.2*cm))
 
-    # Charts
+    # Graphiques (tous ceux fournis par charts_dict)
     for name, fig in charts_dict.items():
         try:
             png = fig_to_png_bytes(fig, scale=2)
@@ -385,33 +456,72 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
         except Exception:
             continue
 
-    # Metrics table (plus clean)
+    # Tableau des métriques : colonnes plus larges + wrap automatique
     if metrics_df is not None and not metrics_df.empty:
         elements.append(Paragraph("Portfolio Metrics", h2))
-        # formater
+
         df = metrics_df.copy()
-        # construire data = header + rows
-        data = [["Metric"] + df.columns.tolist()]
+        # Construire data = header + rows avec Paragraphs (wrap)
+        header_cells = [Paragraph("Metric", cell_left)] + \
+                       [Paragraph(str(c), cell_left) for c in df.columns.tolist()]
+        data = [header_cells]
+
         for idx, row in df.iterrows():
-            data.append([idx] + [("" if pd.isna(v) else str(v)) for v in row.values])
-        table = Table(data, repeatRows=1, colWidths=[5*cm] + [3.0*cm]*len(df.columns))
+            row_cells = [Paragraph(str(idx), cell_left)]
+            for v in row.values:
+                txt = "" if pd.isna(v) else str(v)
+                # Aligner à droite les nombres, à gauche le reste
+                try:
+                    # Si convertible en float → droite
+                    _ = float(str(v).replace(",", "."))
+                    row_cells.append(Paragraph(txt, cell_right))
+                except Exception:
+                    row_cells.append(Paragraph(txt, cell_left))
+            data.append(row_cells)
+
+        # Largeurs de colonnes dynamiques selon la page
+        avail_w = A4[0] - doc.leftMargin - doc.rightMargin
+        first_w = 0.35 * avail_w
+        other_w = (avail_w - first_w) / max(1, (len(df.columns)))
+        col_widths = [first_w] + [other_w]*len(df.columns)
+
+        table = Table(data, repeatRows=1, colWidths=col_widths)
         table.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(-1,0), rl_colors.HexColor(PRIMARY)),
             ('TEXTCOLOR',(0,0),(-1,0), rl_colors.white),
             ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
             ('FONTSIZE',(0,0),(-1,0),10),
+            ('VALIGN',(0,0),(-1,-1),'TOP'),
             ('ALIGN',(1,1),(-1,-1),'RIGHT'),
             ('ALIGN',(0,0),(0,-1),'LEFT'),
             ('GRID',(0,0),(-1,-1),0.3, rl_colors.HexColor("#DDDDDD")),
             ('ROWBACKGROUNDS',(0,1),(-1,-1), [rl_colors.whitesmoke, rl_colors.HexColor("#F7F7F7")]),
             ('BOTTOMPADDING',(0,0),(-1,0),6),
             ('TOPPADDING',(0,0),(-1,0),6),
+            ('LEFTPADDING',(0,0),(-1,-1),4),
+            ('RIGHTPADDING',(0,0),(-1,-1),4),
         ]))
         elements.append(table)
+
+    # Glossaire en fin de rapport
+    elements.append(PageBreak())
+    elements.append(Paragraph("Glossaire des indicateurs de risque (*)", h2))
+    gloss_lines = [
+        "<b>Volatilité*</b> : écart-type des rendements journaliers, annualisé (base 252).",
+        "<b>Max Drawdown*</b> : pire baisse (pic-creux) cumulée sur la période.",
+        "<b>Sharpe*</b> : (Rendement annualisé − Taux sans risque) / Volatilité.",
+        "<b>Sortino*</b> : variante du Sharpe ne pénalisant que la volatilité baissière.",
+        "<b>Calmar*</b> : Rendement annualisé / |Max Drawdown|.",
+        "<b>VaR (historique, daily)*</b> : perte seuil, dépassée dans (1−α) des cas.",
+        "<b>CVaR (Expected Shortfall)*</b> : perte moyenne conditionnelle au-delà de la VaR.",
+    ]
+    for line in gloss_lines:
+        elements.append(Paragraph(line, normal))
 
     doc.build(elements)
     buffer.seek(0)
     return buffer
+
 
 # ------------------ UI : sidebar -------------------------------------
 with st.sidebar:
@@ -584,8 +694,12 @@ if st.button("🔎 Analyser"):
         fig_heat = plot_heatmap_corr(df_graph, asset_names_map, f"Matrice de corrélation {label_period}")
         fig_perf = plot_perf_bars(df_graph, asset_names_map, f"Performances cumulées {label_period}")
         fig_lines = plot_cumulative_lines(df_graph, asset_names_map, f"Évolution des actifs {label_period}")
-        fig_rel = plot_relative_vs_benchmark(df_graph, benchmark_ticker, asset_names_map,
-                                             f"Sur-/sous-performance vs benchmark ({asset_names_map.get(benchmark_ticker, benchmark_ticker)}) {label_period}")
+        sleeve_nav = build_crypto_sleeve_nav(df, crypto_allocation, crypto_mapping)
+        fig_rel = plot_crypto_sleeve_vs_benchmark(
+            df, benchmark_ticker, sleeve_nav, asset_names_map,
+            f"Poche crypto vs benchmark ({asset_names_map.get(benchmark_ticker, benchmark_ticker)}) {label_period}"
+)
+        
 
         st.plotly_chart(fig_heat, use_container_width=True)
         st.plotly_chart(fig_perf, use_container_width=True)
