@@ -45,7 +45,10 @@ def ensure_kaleido() -> bool:
             return False
 
 def ensure_python_docx() -> bool:
-    """Installe python-docx si nécessaire (pour l'export Word)."""
+    """
+    Vérifie que le module 'docx' (python-docx) est dispo.
+    Tente un 'pip install python-docx' si nécessaire.
+    """
     try:
         import docx  # noqa: F401
         return True
