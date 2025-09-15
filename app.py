@@ -61,56 +61,56 @@ def _possible_chrome_paths():
         for p in ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"]:
             if os.path.exists(p): yield p
 
-def ensure_plotly_chrome(verbose=False) -> bool:
-    """
-    1) Cherche Chrome localement
-    2) Si absent, essaie l'installeur Plotly (CLI): plotly_get_chrome / plotly-get-chrome / python -m plotly get-chrome
-    3) Configure pio.kaleido.scope.chromium_executable + variables d'env
-    """
-    def _configure(path: str) -> bool:
-        if not path or not os.path.exists(path):
-            return False
-        os.environ["PLOTLY_CHROME"] = path   # reconnu par Plotly
-        os.environ["KAL_CHROME_PATH"] = path # pour certaines builds Kaleido
-        try:
-            # Certaines versions nécessitent de réinitialiser la scope
-            # (on la crée si elle n'existe pas encore)
-            _ = pio.kaleido.scope
-            pio.kaleido.scope.chromium_executable = path
-        except Exception:
-            pass
-        return True
-
-    # 1) déjà disponible ?
-    try:
-        exe = getattr(pio.kaleido.scope, "chromium_executable", None)
-        if exe and os.path.exists(exe):
-            return True
-    except Exception:
-        pass
-    for p in _possible_chrome_paths():
-        if _configure(p): 
-            if verbose: print(f"[plotly] Using Chrome at: {p}")
-            return True
-
-    # 2) tenter l'installation via la CLI plotly_get_chrome
-    cmds = [
-        ["plotly_get_chrome"],
-        ["plotly-get-chrome"],
-        [sys.executable, "-m", "plotly", "get-chrome"],
-    ]
-    for cmd in cmds:
-        try:
-            out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
-            if verbose: print(out)
-            # après installation, re-scanne
-            for p in _possible_chrome_paths():
-                if _configure(p):
-                    return True
-        except Exception as e:
-            if verbose: print(f"[plotly] get-chrome attempt failed: {cmd} -> {e}")
-            continue
-    return False
+#def ensure_plotly_chrome(verbose=False) -> bool:
+#    """
+#    1) Cherche Chrome localement
+#    2) Si absent, essaie l'installeur Plotly (CLI): plotly_get_chrome / plotly-get-chrome / python -m plotly get-chrome
+#    3) Configure pio.kaleido.scope.chromium_executable + variables d'env
+#    """
+#    def _configure(path: str) -> bool:
+#        if not path or not os.path.exists(path):
+#            return False
+#        os.environ["PLOTLY_CHROME"] = path   # reconnu par Plotly
+#        os.environ["KAL_CHROME_PATH"] = path # pour certaines builds Kaleido
+#        try:
+#            # Certaines versions nécessitent de réinitialiser la scope
+#            # (on la crée si elle n'existe pas encore)
+#            _ = pio.kaleido.scope
+#            pio.kaleido.scope.chromium_executable = path
+#        except Exception:
+#            pass
+#        return True
+#
+#    # 1) déjà disponible ?
+#    try:
+#        exe = getattr(pio.kaleido.scope, "chromium_executable", None)
+#        if exe and os.path.exists(exe):
+#            return True
+#    except Exception:
+#        pass
+#    for p in _possible_chrome_paths():
+#        if _configure(p): 
+#            if verbose: print(f"[plotly] Using Chrome at: {p}")
+#           return True
+#
+#    # 2) tenter l'installation via la CLI plotly_get_chrome
+#    cmds = [
+#        ["plotly_get_chrome"],
+#        ["plotly-get-chrome"],
+#        [sys.executable, "-m", "plotly", "get-chrome"],
+#    ]
+#    for cmd in cmds:
+#       try:
+#            out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
+#            if verbose: print(out)
+#            # après installation, re-scanne
+#            for p in _possible_chrome_paths():
+#                if _configure(p):
+#                    return True
+#       except Exception as e:
+#            if verbose: print(f"[plotly] get-chrome attempt failed: {cmd} -> {e}")
+#            continue
+#    return False
 
 
 def _to_bytes(uploaded_file):
@@ -429,14 +429,24 @@ def plot_portfolios_cum(nav_dict, title):
     return fig
 
 def fig_to_png_bytes(fig, scale=2):
-    # S'assure Kaleido + Chrome
-    if not ensure_kaleido():
-        raise RuntimeError("Kaleido introuvable et installation impossible.")
-    if not ensure_plotly_chrome():
-        raise RuntimeError("Google Chrome manquant. Échec de l'installation via plotly_get_chrome.")
+    """
+    Exporte une figure Plotly en PNG via Kaleido UNIQUEMENT (pas besoin de Chrome).
+    Tente d'installer kaleido si absent, puis exporte. Remonte l'erreur si échec.
+    """
+    try:
+        import kaleido  # noqa: F401
+    except Exception:
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "kaleido"])
+            import kaleido  # noqa: F401
+        except Exception as e:
+            raise RuntimeError(f"Installation de kaleido impossible: {e}")
 
-    # Export (engine=kaleido)
-    return fig.to_image(format="png", scale=scale, engine="kaleido")
+    try:
+        return fig.to_image(format="png", scale=scale, engine="kaleido")
+    except Exception as e:
+        raise RuntimeError(f"Export Plotly→PNG (kaleido) a échoué: {e}")
+
 
 def build_crypto_sleeve_nav(df_prices, crypto_allocation_pairs, crypto_mapping):
     """
@@ -920,7 +930,14 @@ if st.button("🔎 Analyser"):
             "- **CVaR*** (ou Expected Shortfall) : **perte moyenne** conditionnelle au-delà de la VaR (mesure la gravité des pires jours)."
         )
 
-        # ================== ZONE EXPORT PERSISTANTE ==================
+            
+    except Exception as e:
+        st.error("❌ Erreur lors du chargement ou de l’analyse des données.")
+        st.code(str(e))
+        st.info("💡 Réessayez avec une période, un actif, ou un sous-ensemble plus restreint.")
+
+
+# ================== ZONE EXPORT PERSISTANTE ==================
         if "export_payload" in st.session_state:
             payload = st.session_state["export_payload"]
 
@@ -959,9 +976,3 @@ if st.button("🔎 Analyser"):
                                        data=st.session_state["pdf_bytes"],
                                        file_name="rapport_portefeuille.pdf",
                                        mime="application/pdf")
-
-    
-    except Exception as e:
-        st.error("❌ Erreur lors du chargement ou de l’analyse des données.")
-        st.code(str(e))
-        st.info("💡 Réessayez avec une période, un actif, ou un sous-ensemble plus restreint.")
