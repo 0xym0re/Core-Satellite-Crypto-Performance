@@ -883,11 +883,20 @@ charts_for_pdf = {
     "Portefeuilles (base 100)": fig_ports,
 }
 # Composition en texte simple pour PDF (sans HTML)
-comp_plain = [
-    Paragraph(line.replace("<b>","").replace("</b>",""), getSampleStyleSheet()["BodyText"]).getPlainText()
-    for line in comp_lines
-]
-
+comp_plain = []
+for line in comp_lines:
+    p = Paragraph(line.replace("<b>","").replace("</b>",""), getSampleStyleSheet()["BodyText"])
+    comp_plain.append(p.getPlainText())
+ 
+def _to_bytes(uploaded_file):
+        if not uploaded_file:
+            return None
+        try:
+            uploaded_file.seek(0)
+        except Exception:
+            pass
+        return uploaded_file.read()
+    
 st.session_state["export_payload"] = {
     "df_graph": df_graph,                       # prix des tickers choisis (index date)
     "perf_pct": perf_pct,                       # perfs cumulées en %
@@ -904,6 +913,20 @@ st.success("Résultats prêts pour export (Excel / PDF) dans la section en bas d
         if "US 10Y Yield" in selected_comparisons or benchmark_label == "US 10Y Yield":
             st.info("ℹ️ 'US 10Y Yield' (^TNX) est un rendement (pas un prix). Interpréter les comparaisons avec prudence.")
 
+
+        # ---------------- Notes / Glossaire risques -------------------
+        st.markdown("---")
+        st.markdown("### ℹ️ Notes sur les indicateurs de risque (*)")
+        st.caption(
+            "- **Volatilité*** : écart-type des rendements journaliers, annualisé (base 252). Plus élevé = plus instable.\n"
+            "- **Max Drawdown*** : pire baisse en % entre un pic et le creux suivant (mesure la profondeur des pertes).\n"
+            "- **Sharpe*** : (Rendement annualisé − Taux sans risque) / Volatilité. "
+            "Ex.: un Sharpe de 1,0 signifie ~1 point de rendement excédentaire par point de volatilité.\n"
+            "- **Sortino*** : variante du Sharpe qui ne pénalise que la volatilité **baissière** (downside deviation).\n"
+            "- **Calmar*** : Rendement annualisé / |Max Drawdown|. Plus il est élevé, meilleur est le couple rendement/perte maximale.\n"
+            "- **VaR*** (historique, daily) : perte **seuil** telle qu’elle n’est dépassée que dans (1−α) des cas (ex. α=95% ⇒ 5% des pires jours au-delà de la VaR).\n"
+            "- **CVaR*** (ou Expected Shortfall) : **perte moyenne** conditionnelle au-delà de la VaR (mesure la gravité des pires jours)."
+        )
 
 # ================== ZONE EXPORT PERSISTANTE ==================
 if "export_payload" in st.session_state:
@@ -944,20 +967,8 @@ if "export_payload" in st.session_state:
                                data=st.session_state["pdf_bytes"],
                                file_name="rapport_portefeuille.pdf",
                                mime="application/pdf")
-        # ---------------- Notes / Glossaire risques -------------------
-        st.markdown("---")
-        st.markdown("### ℹ️ Notes sur les indicateurs de risque (*)")
-        st.caption(
-            "- **Volatilité*** : écart-type des rendements journaliers, annualisé (base 252). Plus élevé = plus instable.\n"
-            "- **Max Drawdown*** : pire baisse en % entre un pic et le creux suivant (mesure la profondeur des pertes).\n"
-            "- **Sharpe*** : (Rendement annualisé − Taux sans risque) / Volatilité. "
-            "Ex.: un Sharpe de 1,0 signifie ~1 point de rendement excédentaire par point de volatilité.\n"
-            "- **Sortino*** : variante du Sharpe qui ne pénalise que la volatilité **baissière** (downside deviation).\n"
-            "- **Calmar*** : Rendement annualisé / |Max Drawdown|. Plus il est élevé, meilleur est le couple rendement/perte maximale.\n"
-            "- **VaR*** (historique, daily) : perte **seuil** telle qu’elle n’est dépassée que dans (1−α) des cas (ex. α=95% ⇒ 5% des pires jours au-delà de la VaR).\n"
-            "- **CVaR*** (ou Expected Shortfall) : **perte moyenne** conditionnelle au-delà de la VaR (mesure la gravité des pires jours)."
-        )
-      
+
+    
     except Exception as e:
         st.error("❌ Erreur lors du chargement ou de l’analyse des données.")
         st.code(str(e))
