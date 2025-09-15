@@ -18,6 +18,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import sys, subprocess, os, shutil
 import plotly.io as pio
+import matplotlib.pyplot as plt
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors as rl_colors
@@ -429,6 +430,95 @@ def plot_crypto_sleeve_vs_benchmark(df_all, benchmark_ticker, sleeve_nav, names_
     return fig
 
 # ----------------------------------------------------------------------------------------
+# Fallback Matplotlib (export des graphes sans kaleido / chrome)
+# ----------------------------------------------------------------------------------------
+def mpl_fig_to_png_bytes(fig, dpi=200):
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+def make_heatmap_png_mpl(df_prices, names_map, title):
+    D = df_prices.ffill().bfill().pct_change().dropna(how="all")
+    C = D.corr()
+    C.index = [names_map.get(c, c) for c in C.index]
+    C.columns = [names_map.get(c, c) for c in C.columns]
+    vals = C.values
+    n, m = vals.shape
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    im = ax.imshow(vals, aspect='auto')
+    ax.set_xticks(np.arange(m))
+    ax.set_xticklabels(C.columns, rotation=45, ha='right', fontsize=8)
+    ax.set_yticks(np.arange(n))
+    ax.set_yticklabels(C.index, fontsize=8)
+    for i in range(n):
+        for j in range(m):
+            ax.text(j, i, f"{vals[i, j]:.2f}", ha='center', va='center', fontsize=7)
+    ax.set_title(title)
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+    return mpl_fig_to_png_bytes(fig)
+
+def make_perf_bars_png_mpl(df_prices, names_map, title):
+    df = df_prices.ffill().bfill()
+    perf = (df.iloc[-1] / df.iloc[0] - 1).sort_values(ascending=True) * 100.0
+    labels = [names_map.get(k, k) for k in perf.index.tolist()]
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.barh(labels, perf.values)
+    for i, v in enumerate(perf.values):
+        ax.text(v + (0.3 if v >= 0 else -0.3), i, f"{v:.2f}%", va='center',
+                ha='left' if v >= 0 else 'right', fontsize=8)
+    ax.set_title(title)
+    ax.set_xlabel("Performance (%)")
+    fig.tight_layout()
+    return mpl_fig_to_png_bytes(fig)
+
+def make_cumulative_lines_png_mpl(df_prices, names_map, title):
+    D = df_prices.ffill().bfill()
+    norm = D.divide(D.iloc[0]) * 100.0
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for col in norm.columns:
+        ax.plot(norm.index, norm[col], label=names_map.get(col, col))
+    ax.set_title(title)
+    ax.set_ylabel("Base 100")
+    ax.legend(fontsize=8, ncol=3)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return mpl_fig_to_png_bytes(fig)
+
+def make_relative_vs_benchmark_png_mpl(df_all, benchmark_ticker, names_map, title):
+    df = df_all.ffill().bfill()
+    if benchmark_ticker not in df.columns:
+        return None
+    bench = df[benchmark_ticker] / df[benchmark_ticker].iloc[0]
+    rel = (df.divide(bench, axis=0) - 1.0) * 100.0
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for col in [c for c in df.columns if c != benchmark_ticker]:
+        ax.plot(rel.index, rel[col], label=names_map.get(col, col))
+    ax.set_title(title)
+    ax.set_ylabel("Sur/ss perf vs benchmark (%)")
+    ax.legend(fontsize=8, ncol=3)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return mpl_fig_to_png_bytes(fig)
+
+def make_portfolios_cum_png_mpl(nav_dict, title):
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for name, r in nav_dict.items():
+        if r is None or r.empty:
+            continue
+        cum = (1 + r).cumprod() * 100.0
+        ax.plot(cum.index, cum.values, label=name)
+    ax.set_title(title)
+    ax.set_ylabel("Base 100")
+    ax.legend(fontsize=8, ncol=3)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return mpl_fig_to_png_bytes(fig)
+
+# ----------------------------------------------------------------------------------------
 # PDF report
 # ----------------------------------------------------------------------------------------
 def keep_aspect_image(file_like, target_width_cm):
@@ -483,15 +573,21 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
 
     # Graphiques
     _ = ensure_kaleido()  # pré-check soft
-    for name, fig in charts_dict.items():
+        # Graphiques (accepte soit des bytes PNG, soit des figures Plotly)
+    for name, fig_or_png in charts_dict.items():
         try:
-            png = fig_to_png_bytes(fig, scale=2)
+            if isinstance(fig_or_png, (bytes, bytearray, memoryview)):
+                png_bytes = bytes(fig_or_png)
+            else:
+                # Dernier recours : essaye plotly->png (si kaleido dispo), sinon message dans le PDF
+                png_bytes = fig_to_png_bytes(fig_or_png, scale=2)
             elements.append(Paragraph(name, h2))
-            elements.append(RLImage(io.BytesIO(png), width=17*cm, height=9*cm))
+            elements.append(RLImage(io.BytesIO(png_bytes), width=17*cm, height=9*cm))
             elements.append(Spacer(1, 0.3*cm))
         except Exception as e:
             elements.append(Paragraph(f"⚠️ Impossible d’exporter le graphique « {name} » : {str(e)}", normal))
             elements.append(Spacer(1, 0.2*cm))
+
 
     # Tableau des métriques (header vert)
     if metrics_df is not None and not metrics_df.empty:
@@ -819,13 +915,44 @@ if st.button("🔎 Analyser"):
 
         # ---------------- Export (préparer & stocker) --------------------------
         perf_pct = (df_graph.ffill().bfill()/df_graph.ffill().bfill().iloc[0]-1)*100
+
+        # On tente plotly->PNG et, si ça échoue, on bascule AUTOMATIQUEMENT vers Matplotlib
+        def try_plotly_then_mpl(name, plotly_fig, mpl_builder):
+            try:
+                return fig_to_png_bytes(plotly_fig, scale=2)
+            except Exception:
+                # Fallback pur Matplotlib (aucune dépendance)
+                return mpl_builder()
+
         charts_for_pdf = {
-            "Matrice de corrélation": fig_heat,
-            "Performances cumulées": fig_perf,
-            "Évolution (base 100)": fig_lines,
-            "Perf relative vs benchmark": fig_rel,
-            "Portefeuilles (base 100)": fig_ports,
+            "Matrice de corrélation": try_plotly_then_mpl(
+                "Matrice de corrélation", fig_heat,
+                lambda: make_heatmap_png_mpl(df_graph, asset_names_map, f"Matrice de corrélation {label_period}")
+            ),
+            "Performances cumulées": try_plotly_then_mpl(
+                "Performances cumulées", fig_perf,
+                lambda: make_perf_bars_png_mpl(df_graph, asset_names_map, f"Performances cumulées {label_period}")
+            ),
+            "Évolution (base 100)": try_plotly_then_mpl(
+                "Évolution (base 100)", fig_lines,
+                lambda: make_cumulative_lines_png_mpl(df_graph, asset_names_map, f"Évolution des actifs {label_period}")
+            ),
+            "Perf relative vs benchmark": try_plotly_then_mpl(
+                "Perf relative vs benchmark", fig_rel,
+                lambda: make_relative_vs_benchmark_png_mpl(
+                    df, benchmark_ticker, asset_names_map,
+                    f"Poche crypto vs benchmark ({asset_names_map.get(benchmark_ticker, benchmark_ticker)}) {label_period}"
+                )
+            ),
+            "Portefeuilles (base 100)": try_plotly_then_mpl(
+                "Portefeuilles (base 100)", fig_ports,
+                lambda: make_portfolios_cum_png_mpl(port_returns, f"Performance cumulée des portefeuilles ({rebal_mode})")
+            ),
         }
+
+        # Nettoie les éventuels None (si un builder MPL avait échoué)
+        charts_for_pdf = {k: v for k, v in charts_for_pdf.items() if v is not None}
+
         # Composition en texte simple pour PDF (sans HTML)
         comp_plain = []
         for line in comp_lines:
@@ -837,7 +964,7 @@ if st.button("🔎 Analyser"):
             "perf_pct": perf_pct,
             "metrics_df": metrics_df,
             "gaps": gaps,
-            "charts_for_pdf": charts_for_pdf,
+            "charts_for_pdf": charts_for_pdf,   # <<< maintenant ce sont des PNG bytes (ou Plotly converti)
             "comp_lines_plain": comp_plain,
             "company_name": company_name,
             "logo_bytes": _to_bytes(logo_file),
