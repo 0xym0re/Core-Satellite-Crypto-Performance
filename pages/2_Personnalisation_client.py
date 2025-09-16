@@ -388,19 +388,17 @@ profile = {
     "appetence": appetence,
     "dd_tolerance_pct": dd_tol,
     "var_conf": float(var_conf),
-    "freq": freq,                 # pour MC & métriques
-    "freq_backtest": freq,        # aligne le backtest sur la même fréquence
+    "freq": freq,              # fréquence pour MC & métriques
+    "freq_backtest": freq,     # aligne le backtest sur cette fréquence
     "rebal_mode": rebal_mode,
     "created": str(date.today()),
+    "custom_alloc": custom_alloc,  # <-- l’allocation construite via l’UI
 
-    # Nouveau : on passe directement l’allocation construite par l’UI
-    "custom_alloc": custom_alloc,
-
-    # Defaults MC (tu pourras mettre une UI plus tard)
-    "mc_model": "GBM",
-    "mc_paths": 2000,
-    "mc_block": 20,
-    "seed": 42,
+    # Monte Carlo (depuis l’UI)
+    "mc_model": ("GBM" if mc_model.startswith("GBM") else "BOOT"),
+    "mc_paths": int(mc_paths),
+    "mc_block": int(mc_block),
+    "seed": int(seed),
 }
 
     
@@ -408,8 +406,7 @@ profile = {
 st.session_state["client_profile"] = profile
 
 # --- Lancement (sans implémentation des calculs) -----------------------
-if submitted:
-    results = {}
+if run_clicked:
     # bornes temporelles basiques (1 an glissant par défaut)
     end_date = (pd.Timestamp.today() - pd.Timedelta(days=1)).normalize()
     start_date = end_date - pd.Timedelta(days=int(horizon_annees*365))
@@ -431,27 +428,19 @@ if submitted:
         dfA = df.resample("W-FRI").last().ffill()
 
     # Backtest (3 portefeuilles)
-    from pages.shared_quant import portfolio_daily_returns
-    ports = {
-        "Personnalisé": custom_alloc,
-        "60/40": bench_60_40,
-        "60/40 + 5% Or": bench_60_40_gold
-    }
-    port_returns = {}
-    for name, alloc in ports.items():
-        port_returns[name] = portfolio_daily_returns(dfA, alloc, rebal_mode)
+    ports = {"Personnalisé": custom_alloc, "60/40": bench_60_40, "60/40 + 5% Or": bench_60_40_gold}
+    port_returns = {name: portfolio_daily_returns(dfA, alloc, rebal_mode) for name, alloc in ports.items()}
 
     # Metrics
     metrics = {}
     for name, r in port_returns.items():
         metrics[name] = compute_metrics_from_returns(
-            r, dpy=dpy, rf_annual=0.0,  # tu peux mettre le RF plus tard
-            want_sortino=True, want_calmar=True,
-            want_var=True, want_cvar=True, var_alpha=profile["var_conf"]
+            r, dpy=dpy, rf_annual=0.0,
+            want_sortino=True, want_calmar=True, want_var=True, want_cvar=True, var_alpha=profile["var_conf"]
         )
     metrics_df = pd.DataFrame(metrics)
 
-    # Monte Carlo sur le portefeuille Personnalisé (piloté par l’appétence)
+    # Monte Carlo piloté par l’appétence (réutilise les retours backtest)
     def risk_controls(score):
         vol_scale = float(np.interp(score, [1, 10], [0.6, 1.6]))
         df_tail   = int(round(np.interp(score, [1, 10], [12, 4])))
@@ -466,23 +455,37 @@ if submitted:
         vol = r_hist.std() * np.sqrt(dpy)
         vol_scale, df_tail, mu_shift = risk_controls(appetence)
 
-        horizon_days = int(horizon_annees * (252 if profile["freq"]=="Daily" else 52))
-        n_paths = 2000
+        horizon_steps = int(horizon_annees * (252 if profile["freq"]=="Daily" else 52))
+        steps_per_year = 252 if profile["freq"]=="Daily" else 52
+        step_mu  = (1+mu+mu_shift)**(1/steps_per_year) - 1
+        step_vol = (vol * vol_scale) / np.sqrt(steps_per_year)
 
-        # génère des rendements annualisés puis reconvertit à la fréquence choisie
-        step_per_year = 252 if profile["freq"]=="Daily" else 52
-        step_mu  = (1+mu+mu_shift)**(1/step_per_year) - 1
-        step_vol = (vol * vol_scale) / np.sqrt(step_per_year)
+        np.random.seed(profile["seed"])
+        if profile["mc_model"] == "GBM":
+            shocks = np.random.normal(loc=0.0, scale=step_vol, size=(horizon_steps, profile["mc_paths"]))
+        else:
+            # block bootstrap des rendements historiques (à la fréquence choisie)
+            series = r_hist.values
+            B = max(5, int(profile["mc_block"]))
+            shocks = np.zeros((horizon_steps, profile["mc_paths"]))
+            for j in range(profile["mc_paths"]):
+                out = []
+                while len(out) < horizon_steps:
+                    s0 = np.random.randint(0, max(1, len(series)-B))
+                    out.extend(series[s0:s0+B])
+                shocks[:, j] = np.array(out[:horizon_steps]) - r_hist.mean()  # centre sur 0
 
-        np.random.seed(42)
-        shocks = np.random.standard_t(df_tail, size=(horizon_days, n_paths)) * (step_vol/np.sqrt(df_tail/(df_tail-2)))  # t->vol target
+            # recale la vol désirée
+            std_now = shocks.std()
+            if std_now > 1e-12:
+                shocks *= (step_vol / std_now)
+
         step_r = step_mu + shocks
         nav = np.cumprod(1 + step_r, axis=0)
-        nav = pd.DataFrame(nav, index=pd.date_range(start=end_date, periods=horizon_days, freq=("B" if profile["freq"]=="Daily" else "W-FRI")))
-        nav.iloc[0,:] = 1.0  # base 1
+        nav = pd.DataFrame(nav)
+        nav.iloc[0, :] = 1.0
 
-        # VaR/CVaR en $ à horizon
-        final_r = nav.iloc[-1,:] - 1.0
+        final_r = nav.iloc[-1, :] - 1.0
         alpha = profile["var_conf"]
         capital0 = investissement
         q = np.quantile(final_r, 1-alpha)
@@ -499,12 +502,11 @@ if submitted:
                 f"CVaR {int(alpha*100)}% ($)": [cvar_cash],
             }),
             "metrics": {"mu_ann_hist": float(mu), "vol_ann_hist": float(vol),
-                        "vol_scale": vol_scale, "df": df_tail, "mu_shift": mu_shift}
+                        "vol_scale": vol_scale, "df": df_tail, "mu_shift": mu_shift,
+                        "model": profile["mc_model"], "paths": int(profile["mc_paths"])}
         }
 
-    results["backtest"] = {"returns": port_returns, "metrics_df": metrics_df}
-    results["mc"] = mc
-    st.session_state["client_results"] = results
+    st.session_state["client_results"] = {"backtest": {"returns": port_returns, "metrics_df": metrics_df}, "mc": mc}
     st.success("Backtest + Monte Carlo terminés.")
 
 # --- Affichage minimal des emplacements (placeholder) ------------------
@@ -532,3 +534,18 @@ if "client_results" in st.session_state:
 # --- Zone export (sera branchée sur vos générateurs PDF/DOCX) ----------
 st.divider()
 st.caption("Zone export (à relier plus tard aux générateurs de rapports).")
+
+st.divider()
+st.markdown("### ℹ️ Glossaire des paramètres")
+st.markdown(
+    "- **Fréquence** : cadence d’échantillonnage (Daily ≈ 252, Weekly ≈ 52). "
+    "Impacte l’annualisation et la longueur de l’horizon.\n"
+    "- **Rebalancing** : rééquilibrage du portefeuille aux poids cibles (Buy&Hold = aucun, Monthly/Quarterly = périodique).\n"
+    "- **Confiance VaR/CVaR** : probabilité de ne pas dépasser la perte (VaR) et perte moyenne conditionnelle au-delà (CVaR).\n"
+    "- **Modèle Monte Carlo** :\n"
+    "   - **GBM (normal i.i.d.)** : tirages indépendants avec moyenne/vol empirique.\n"
+    "   - **Block bootstrap** : ré-échantillonnage par blocs des rendements historiques pour préserver certaines dépendances.\n"
+    "- **N (nombre de chemins)** : plus grand = intervalles plus stables mais plus de calcul.\n"
+    "- **Taille de bloc** : pour le bootstrap ; plus grand = plus d’autocorrélations conservées, moins de diversité.\n"
+    "- **Seed (graine)** : fixe l’aléatoire pour reproduire les mêmes résultats."
+)
