@@ -6,6 +6,7 @@ asset_mapping = {
     "Dollar Index": "DX-Y.NYB",
     "Gold": "GC=F",
     "iShares Bonds Agregate": "AGGG.L",
+    "Amundi PEA Immobilier Europe (PMEH)": "PMEH.PA",
 }
 crypto_static = {
     "Bitcoin (BTC$)": "BTC-USD",
