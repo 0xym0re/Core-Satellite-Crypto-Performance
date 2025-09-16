@@ -95,80 +95,13 @@ def _heatmap_cmap():
         return LinearSegmentedColormap.from_list("cs_map", [PRIMARY, "#F2F2F2", SECONDARY], N=256)
     except Exception:
         return "viridis"
-        
-# ----------------------------------------------------------------------------------------
-# Mappings de base (fallback)
-# ----------------------------------------------------------------------------------------
-asset_mapping = {
-    "MSCI World": "URTH",
-    "Nasdaq": "^IXIC",
-    "S&P 500": "^GSPC",
-    "US 10Y Yield": "^TNX",     # rendement, pas un prix
-    "Dollar Index": "DX-Y.NYB",
-    "Gold": "GC=F",
-    "iShares Bonds Agregate": "AGGG.L",
-}
-crypto_static = {
-    "Bitcoin (BTC$)": "BTC-USD",
-    "Ethereum (ETH$)": "ETH-USD",
-    "Solana (SOL)": "SOL-USD",
-    "Binance Coin (BNB)": "BNB-USD",
-    "XRP (XRP)": "XRP-USD",
-    "Cardano (ADA)": "ADA-USD",
-    "Dogecoin (DOGE)": "DOGE-USD",
-    "Polygon (MATIC)": "MATIC-USD",
-    "TRON (TRX)": "TRX-USD",
-    "Toncoin (TON)": "TON11419-USD",
-    "Polkadot (DOT)": "DOT-USD",
-    "Litecoin (LTC)": "LTC-USD",
-    "Bitcoin Cash (BCH)": "BCH-USD",
-    "Chainlink (LINK)": "LINK-USD",
-    "Stellar (XLM)": "XLM-USD",
-    "Monero (XMR)": "XMR-USD",
-    "Avalanche (AVAX)": "AVAX-USD",
-    "Aptos (APT)": "APT-USD",
-    "NEAR Protocol (NEAR)": "NEAR-USD",
-    "Arbitrum (ARB)": "ARB-USD",
-    "Render (RNDR)": "RNDR-USD",
-    "Optimism (OP)": "OP-USD",
-    "Uniswap (UNI)": "UNI-USD",
-    "Cosmos (ATOM)": "ATOM-USD",
-    "Filecoin (FIL)": "FIL-USD",
-    "Aave (AAVE)": "AAVE-USD",
-    "Sui (SUI)": "SUI-USD",
-    "Maker (MKR)": "MKR-USD",
-    "IOTA (IOTA)": "IOTA-USD",
-    "Algorand (ALGO)": "ALGO-USD",
-    "VeChain (VET)": "VET-USD",
-    "Injective (INJ)": "INJ-USD",
-    "Celestia (TIA)": "TIA-USD",
-    "Jupiter (JUP)": "JUP-USD",
-    "Synthetix (SNX)": "SNX-USD",
-    "The Graph (GRT)": "GRT-USD",
-    "Fetch.AI (FET)": "FET-USD",
-    "Hyperliquid (HYPE)": "HYPE32196-USD",
-    "Bittensor (TAO)": "TAO22974-USD",
-    "Shiba Inu (SHIB)": "SHIB-USD",
-    "Mantle (MNT)": "MNT-USD",
-    "PEPE (PEPE)": "PEPE-USD",
-    "Ondo (ONDO)": "ONDO-USD",
-    "Stacks (STX)": "STX-USD",
-    "Chiliz (CHZ)": "CHZ-USD",
-    "Raydium (RAY)": "RAY-USD",
-    "dogwifhat (WIF)": "WIF-USD",
-    "Theta (THETA)": "THETA-USD",
-    "Tezos (XTZ)": "XTZ-USD",
-    "Morpho (MORPHO)": "MORPHO-USD",
-}
-us_equity_mapping = {
-    "Apple (AAPL)": "AAPL",
-    "Microsoft (MSFT)": "MSFT",
-    "Amazon (AMZN)": "AMZN",
-    "NVIDIA (NVDA)": "NVDA",
-    "Alphabet (GOOGL)": "GOOGL",
-    "Meta (META)": "META",
-    "Tesla (TSLA)": "TSLA",
-}
+
+
+# Si tu gardes l’option "liste crypto dynamique", garde la logique existante
+crypto_mapping = build_crypto_mapping_dynamic() if use_dynamic_crypto else crypto_static
+
+full_asset_mapping = {**asset_mapping, **crypto_mapping, **us_equity_mapping}
+asset_names_map = {v: k for k, v in full_asset_mapping.items()}
 
 # ----------------------------------------------------------------------------------------
 # App config
@@ -1010,7 +943,7 @@ with c2:
 # ----------------------------------------------------------------------------------------
 st.markdown("**Liste des actifs à comparer**")
 compare_assets = [a for a in available_assets]
-preselect = ["Bitcoin (BTC$)","Ethereum (ETH$)","MSCI World","S&P 500","Gold"]
+preselect = ["Bitcoin (BTC$)","Ethereum (ETH$)","MSCI World","S&P 500","Gold","Amundi PEA Immobilier Europe (PMEH)"]
 safe_default = [a for a in preselect if a in compare_assets]
 selected_comparisons = st.multiselect("📊 Actifs à comparer :", compare_assets, default=safe_default)
 compare_tickers = [full_asset_mapping[a] for a in selected_comparisons if a in full_asset_mapping]
