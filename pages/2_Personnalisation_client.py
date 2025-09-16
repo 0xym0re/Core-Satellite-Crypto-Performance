@@ -229,16 +229,16 @@ def run_monte_carlo(profile: dict) -> dict:
         alpha = profile["var_conf"]
         q = np.quantile(terminal, 1 - alpha)
         losses = np.clip(capital0 - terminal, a_min=0, a_max=None)
-        var_$ = float(capital0 - q)
-        cvar_$ = float(losses[terminal <= q].mean() if np.any(terminal <= q) else var_$)
+        var_usd = float(capital0 - q)
+        cvar_usd = float(losses[terminal <= q].mean() if np.any(terminal <= q) else var_usd)
 
         summary = pd.DataFrame({
             "Metric": ["Capital initial", "Espérance finale", f"VaR {int(alpha*100)}%", f"CVaR {int(alpha*100)}%", "P5", "P50", "P95"],
             "Value ($)": [
                 round(capital0,2),
                 round(float(terminal.mean()),2),
-                round(var_$,2),
-                round(cvar_$,2),
+                round(var_usd,2),
+                round(cvar_usd,2),
                 round(float(np.percentile(terminal, 5)),2),
                 round(float(np.percentile(terminal, 50)),2),
                 round(float(np.percentile(terminal, 95)),2),
