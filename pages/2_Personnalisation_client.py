@@ -105,40 +105,9 @@ def drawdown_stats(series):
     max_dd = dd.min() if len(dd) else np.nan
     return dd, max_dd
 
-def compute_metrics_from_returns(r, dpy=252, rf_annual=0.0):
-    if r is None or len(r)==0: 
-        return {"Annualized Return %": np.nan, "Volatility %": np.nan,
-                "Max Drawdown %": np.nan, "Sharpe": np.nan}
-    cum_ret = (1 + r).prod() - 1
-    cagr = (1 + cum_ret)**(dpy/len(r)) - 1
-    mu_ann = r.mean() * dpy
-    vol_ann = r.std() * np.sqrt(dpy)
-    sharpe = (mu_ann - rf_annual) / vol_ann if vol_ann else np.nan
-    _, mdd = drawdown_stats(r)
-    return {
-        "Annualized Return %": round(cagr*100, 2),
-        "Volatility %": round(vol_ann*100, 2),
-        "Max Drawdown %": round(mdd*100, 2) if pd.notna(mdd) else np.nan,
-        "Sharpe": round(sharpe, 2)
-    }
-
-def _build_allocations_from_profile(profile):
-    if profile["portfolio_choice"].startswith("60/40 (S&P"):
-        return {"^GSPC": 0.60, "AGGG.L": 0.40}
-    elif profile["portfolio_choice"].startswith("60/40 + 5% Or"):
-        return {"^GSPC": 0.57, "AGGG.L": 0.38, "GC=F": 0.05}
-    else:
-        try:
-            d = pd.read_json(pd.io.common.StringIO(profile["custom_weights_json"]), typ="series").to_dict()
-        except Exception:
-            d = {}
-        # sécurité: normalise si somme != 1
-        s = sum(max(0.0, float(v)) for v in d.values()) or 1.0
-        return {k: max(0.0, float(v))/s for k, v in d.items()}
-
 def run_backtest(profile: dict) -> dict:
     try:
-        alloc = _build_allocations_from_profile(profile)
+        alloc = dict(profile.get("custom_alloc", {}))  # <-- prend l'allocation de l’UI
         tickers = sorted(alloc.keys())
         if not tickers:
             return {"returns": pd.Series(dtype=float), "nav": pd.Series(dtype=float), "metrics": {}}
@@ -327,16 +296,16 @@ with st.form("client_inputs"):
 
     # Option : bouton de pré-remplissage par appétence
     def suggested_weights_from_risk(score):
-        # 3 ETFs simples: S&P500 (^GSPC), AGGG.L (agg bond), Gold (GC=F)
-        # Interp linéaire equity/bond, or ~5%
         gold = 0.05
         eq = np.interp(score, [1, 10], [0.20, 0.85])
         bond = 1.0 - gold - eq
         return {"^GSPC": eq, "AGGG.L": max(0.0, bond), "GC=F": gold}
 
-    if st.button("🎚️ Pré-remplir les poids selon l’appétence"):
+    prefill_clicked = st.form_submit_button("🎚️ Pré-remplir les poids selon l’appétence")
+    submitted = st.form_submit_button("🚀 Lancer l’analyse personnalisée", use_container_width=True)
+
+    if prefill_clicked:
         sw = suggested_weights_from_risk(appetence)
-        # Remplit les 3 premières lignes si possible
         for i, (ticker, w) in enumerate(sw.items()):
             st.session_state[f"cust_asset_{i}"] = asset_names_map.get(ticker, ticker)
             st.session_state[f"cust_w_{i}"] = round(w*100, 1)
@@ -357,17 +326,19 @@ profile = {
     "appetence": appetence,
     "dd_tolerance_pct": dd_tol,
     "var_conf": float(var_conf),
-    "freq": freq,
-    "created": str(date.today()),
-    "portfolio_choice": port_choice,
-    "custom_weights_json": custom_json,
+    "freq": freq,                 # pour MC & métriques
+    "freq_backtest": freq,        # aligne le backtest sur la même fréquence
     "rebal_mode": rebal_mode,
-    "freq_backtest": freq_backtest,
-    "mc_model": mc_model,
-    "mc_paths": int(mc_paths),
-    "mc_block": int(mc_block),
-    "seed": int(seed),
-    # Hooks à enrichir: mapping portefeuille cible, contraintes ESG, etc.
+    "created": str(date.today()),
+
+    # Nouveau : on passe directement l’allocation construite par l’UI
+    "custom_alloc": custom_alloc,
+
+    # Defaults MC (tu pourras mettre une UI plus tard)
+    "mc_model": "GBM",
+    "mc_paths": 2000,
+    "mc_block": 20,
+    "seed": 42,
 }
 
     
