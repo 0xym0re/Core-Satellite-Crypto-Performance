@@ -10,7 +10,7 @@ import yfinance as yf
 
 from io import StringIO
 from scipy.stats import norm
-from datetime import timedelta, datetime
+from datetime import timedelta, date
 
 # --- Charte (mêmes codes que la page 1) --------------------------------
 PRIMARY = "#4E26DF"
