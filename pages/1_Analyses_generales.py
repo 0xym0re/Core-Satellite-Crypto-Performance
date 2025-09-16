@@ -713,14 +713,6 @@ def generate_docx_report(company_name, logo_bytes, charts_dict, metrics_df, comp
     h = doc.add_heading(f"{company_name} — Portfolio Report", 0)
     h.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-    # Logo
-    if logo_bytes:
-        try:
-            bio = io.BytesIO(logo_bytes); bio.seek(0)
-            doc.add_picture(bio, width=Cm(4.5))
-        except Exception:
-            pass
-
     # Compositions
     if composition_lines:
         doc.add_heading("Compositions des portefeuilles", level=1)
@@ -872,6 +864,10 @@ crypto_mapping = build_crypto_mapping_dynamic() if use_dynamic_crypto else crypt
 
 full_asset_mapping = {**asset_mapping, **crypto_mapping, **us_equity_mapping}
 asset_names_map = {v: k for k, v in full_asset_mapping.items()}
+
+crypto_tickers_set = set(crypto_mapping.values())
+traditional_tickers_set = set(asset_mapping.values()) | set(us_equity_mapping.values())
+
 st.markdown("## 💼 Composition du portefeuille crypto")
 
 
