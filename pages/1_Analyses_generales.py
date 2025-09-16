@@ -97,38 +97,7 @@ def _heatmap_cmap():
         return "viridis"
 
 # ----------------------------------------------------------------------------------------
-# Crypto list dynamique
-# ----------------------------------------------------------------------------------------
-@st.cache_data(ttl=24*3600, show_spinner=False)
-def build_crypto_mapping_dynamic(min_mcap_usd=2e8, pages=4):
-    out = {}
-    session = requests.Session()
-    for page in range(1, pages+1):
-        url = ("https://api.coingecko.com/api/v3/coins/markets"
-               f"?vs_currency=usd&order=market_cap_desc&per_page=250&page={page}")
-        r = session.get(url, timeout=15)
-        if r.status_code != 200: break
-        arr = r.json()
-        if not arr: break
-        for it in arr:
-            mcap = it.get("market_cap")
-            if mcap is None or mcap < min_mcap_usd: continue
-            name = it.get("name","").strip()
-            sym = (it.get("symbol","") or "").upper()
-            if not sym: continue
-            y_ticker = f"{sym}-USD"
-            try:
-                hist = yf.Ticker(y_ticker).history(period="5d")
-                if hist is None or hist.empty: continue
-                out[f"{name} ({sym})"] = y_ticker
-            except Exception:
-                continue
-    return out
-# Si tu gardes l’option "liste crypto dynamique", garde la logique existante
-crypto_mapping = build_crypto_mapping_dynamic() if use_dynamic_crypto else crypto_static
 
-full_asset_mapping = {**asset_mapping, **crypto_mapping, **us_equity_mapping}
-asset_names_map = {v: k for k, v in full_asset_mapping.items()}
 
 # ----------------------------------------------------------------------------------------
 # App config
@@ -865,25 +834,46 @@ with st.sidebar:
 
 # ----------------------------------------------------------------------------------------
 
-
-st.markdown("## 💼 Composition du portefeuille crypto")
+# Crypto list dynamique
+# ----------------------------------------------------------------------------------------
 use_dynamic_crypto = st.checkbox(
     "Utiliser la liste crypto dynamique (mcap>200M)",
     value=False,
     help="Récupère la liste via CoinGecko et vérifie la dispo sur Yahoo. Fallback : liste statique."
 )
 
-try:
-    crypto_mapping = build_crypto_mapping_dynamic() if use_dynamic_crypto else crypto_static
-except Exception:
-    st.warning("CoinGecko indisponible — fallback sur la liste crypto statique.")
-    crypto_mapping = crypto_static
+@st.cache_data(ttl=24*3600, show_spinner=False)
+def build_crypto_mapping_dynamic(min_mcap_usd=2e8, pages=4):
+    out = {}
+    session = requests.Session()
+    for page in range(1, pages+1):
+        url = ("https://api.coingecko.com/api/v3/coins/markets"
+               f"?vs_currency=usd&order=market_cap_desc&per_page=250&page={page}")
+        r = session.get(url, timeout=15)
+        if r.status_code != 200: break
+        arr = r.json()
+        if not arr: break
+        for it in arr:
+            mcap = it.get("market_cap")
+            if mcap is None or mcap < min_mcap_usd: continue
+            name = it.get("name","").strip()
+            sym = (it.get("symbol","") or "").upper()
+            if not sym: continue
+            y_ticker = f"{sym}-USD"
+            try:
+                hist = yf.Ticker(y_ticker).history(period="5d")
+                if hist is None or hist.empty: continue
+                out[f"{name} ({sym})"] = y_ticker
+            except Exception:
+                continue
+    return out
+# Si tu gardes l’option "liste crypto dynamique", garde la logique existante
+crypto_mapping = build_crypto_mapping_dynamic() if use_dynamic_crypto else crypto_static
 
-# Ensemble complet + map noms
 full_asset_mapping = {**asset_mapping, **crypto_mapping, **us_equity_mapping}
 asset_names_map = {v: k for k, v in full_asset_mapping.items()}
-crypto_tickers_set = set(crypto_mapping.values())
-traditional_tickers_set = set(asset_mapping.values()) | set(us_equity_mapping.values())
+st.markdown("## 💼 Composition du portefeuille crypto")
+
 
 # ----------------------------------------------------------------------------------------
 # Poche crypto
