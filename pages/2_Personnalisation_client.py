@@ -291,7 +291,7 @@ with st.form("client_inputs"):
     st.divider()
     st.subheader("2) Paramètres d’estimation")
 
-    c4, c5 = st.columns(3)
+    c4, c5 = st.columns(2)
     with c4:
         var_conf = st.slider("Confiance VaR/CVaR", 0.80, 0.995, 0.95, 0.005)
     with c5:
