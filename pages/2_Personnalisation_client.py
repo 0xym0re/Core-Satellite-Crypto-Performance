@@ -11,6 +11,10 @@ import yfinance as yf
 from io import StringIO
 from scipy.stats import norm
 from datetime import timedelta, date
+from pages.shared_assets import asset_mapping, crypto_static, us_equity_mapping
+from pages.shared_quant import (
+    download_prices, portfolio_daily_returns, compute_metrics_from_returns
+)
 
 # --- Charte (mêmes codes que la page 1) --------------------------------
 PRIMARY = "#4E26DF"
@@ -289,11 +293,7 @@ with st.form("client_inputs"):
 
     c4, c5, c6 = st.columns(3)
     with c4:
-        mode_calc = st.multiselect(
-            "Méthodes à lancer",
-            ["Backtest", "Monte Carlo"],
-            default=["Backtest", "Monte Carlo"]
-        )
+        
     with c5:
         var_conf = st.slider("Confiance VaR/CVaR", 0.80, 0.995, 0.95, 0.005)
     with c6:
@@ -302,32 +302,52 @@ with st.form("client_inputs"):
     st.divider()
     st.subheader("3) Portefeuille & Monte Carlo")
 
-    c7, c8, c9 = st.columns(3)
-    with c7:
-        port_choice = st.selectbox(
-            "Portefeuille",
-            ["60/40 (S&P 500 / AGGG.L)", "60/40 + 5% Or", "Personnalisé (JSON)"],
-            index=0
-        )
-    with c8:
-        rebal_mode = st.selectbox("Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"], index=1)
-    with c9:
-        freq_backtest = st.selectbox("Fréquence données (backtest)", ["Daily", "Weekly"], index=0)
+    # Univers d'actifs (identique page 1)
+    full_asset_mapping = {**asset_mapping, **crypto_static, **us_equity_mapping}
+    asset_names_map = {v: k for k, v in full_asset_mapping.items()}
 
-    custom_json = st.text_area(
-        "Poids personnalisés (JSON {\"^GSPC\":0.6, \"AGGG.L\":0.4})",
-        value='{"^GSPC": 0.6, "AGGG.L": 0.4}',
-        help="Utilisé uniquement si 'Personnalisé (JSON)' est sélectionné."
-    )
+    n_assets = st.number_input("Nombre d'actifs dans le portefeuille", 1, 20, 3, 1)
+    custom_alloc_pairs = []
+    used = set()
 
-    c10, c11, c12 = st.columns(3)
-    with c10:
-        mc_model = st.selectbox("Modèle Monte Carlo", ["GBM", "Block bootstrap"], index=0)
-    with c11:
-        mc_paths = st.number_input("Trajectoires MC (N)", 100, 20000, 5000, 100)
-    with c12:
-        mc_block = st.number_input("Taille de bloc (bootstrap)", 5, 60, 10, 1)
-    seed = st.number_input("Graine aléatoire", 0, 10**9, 42, 1)
+    cols = st.columns([3, 1])
+    for i in range(int(n_assets)):
+        with cols[0]:
+            choice = st.selectbox(
+                f"Actif {i+1}",
+                list(full_asset_mapping.keys()),
+                key=f"cust_asset_{i}"
+            )
+        with cols[1]:
+            w = st.number_input(f"% poids {i+1}", 0.0, 100.0, 0.0, 0.1, key=f"cust_w_{i}")
+        if choice in full_asset_mapping and full_asset_mapping[choice] not in used:
+            custom_alloc_pairs.append((full_asset_mapping[choice], w/100.0))
+            used.add(full_asset_mapping[choice])
+
+    sum_w = sum(w for _, w in custom_alloc_pairs)*100
+    if not np.isclose(sum_w, 100.0, atol=0.01):
+        st.warning(f"⚠️ La somme des poids est {sum_w:.2f}%, elle doit être 100%.")
+    custom_alloc = {t: w for t, w in custom_alloc_pairs if w > 0}
+
+    # Option : bouton de pré-remplissage par appétence
+    def suggested_weights_from_risk(score):
+        # 3 ETFs simples: S&P500 (^GSPC), AGGG.L (agg bond), Gold (GC=F)
+        # Interp linéaire equity/bond, or ~5%
+        gold = 0.05
+        eq = np.interp(score, [1, 10], [0.20, 0.85])
+        bond = 1.0 - gold - eq
+        return {"^GSPC": eq, "AGGG.L": max(0.0, bond), "GC=F": gold}
+
+    if st.button("🎚️ Pré-remplir les poids selon l’appétence"):
+        sw = suggested_weights_from_risk(appetence)
+        # Remplit les 3 premières lignes si possible
+        for i, (ticker, w) in enumerate(sw.items()):
+            st.session_state[f"cust_asset_{i}"] = asset_names_map.get(ticker, ticker)
+            st.session_state[f"cust_w_{i}"] = round(w*100, 1)
+        st.experimental_rerun()
+
+    st.divider()
+    rebal_mode = st.selectbox("Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"], index=1)
     
     st.caption("Les champs ci-dessus ne déclenchent aucun calcul tant que vous n’avez pas cliqué sur **Lancer**.")
     submitted = st.form_submit_button("🚀 Lancer l’analyse personnalisée", use_container_width=True)
@@ -361,40 +381,124 @@ st.session_state["client_profile"] = profile
 # --- Lancement (sans implémentation des calculs) -----------------------
 if submitted:
     results = {}
+    # bornes temporelles basiques (1 an glissant par défaut)
+    end_date = (pd.Timestamp.today() - pd.Timedelta(days=1)).normalize()
+    start_date = end_date - pd.Timedelta(days=int(horizon_annees*365))
 
-    if "Backtest" in mode_calc:
-        with st.spinner("Backtest en préparation…"):
-            results["backtest"] = run_backtest(profile)
+    # Portefeuilles benchmark
+    bench_60_40 = {"^GSPC": 0.60, "AGGG.L": 0.40}
+    bench_60_40_gold = {"^GSPC": 0.57, "AGGG.L": 0.38, "GC=F": 0.05}
 
-    if "Monte Carlo" in mode_calc:
-        with st.spinner("Monte Carlo en préparation…"):
-            results["mc"] = run_monte_carlo(profile)
+    # Tickers à télécharger (custom + benchmarks)
+    all_tickers = set(custom_alloc.keys()) | set(bench_60_40.keys()) | set(bench_60_40_gold.keys())
+    df = download_prices(sorted(all_tickers), start_date, end_date)
 
+    # Fréquence
+    if profile["freq"] == "Daily":
+        dpy = 252
+        dfA = df.resample("B").last().ffill()
+    else:
+        dpy = 52
+        dfA = df.resample("W-FRI").last().ffill()
+
+    # Backtest (3 portefeuilles)
+    from pages.shared_quant import portfolio_daily_returns
+    ports = {
+        "Personnalisé": custom_alloc,
+        "60/40": bench_60_40,
+        "60/40 + 5% Or": bench_60_40_gold
+    }
+    port_returns = {}
+    for name, alloc in ports.items():
+        port_returns[name] = portfolio_daily_returns(dfA, alloc, rebal_mode)
+
+    # Metrics
+    metrics = {}
+    for name, r in port_returns.items():
+        metrics[name] = compute_metrics_from_returns(
+            r, dpy=dpy, rf_annual=0.0,  # tu peux mettre le RF plus tard
+            want_sortino=True, want_calmar=True,
+            want_var=True, want_cvar=True, var_alpha=profile["var_conf"]
+        )
+    metrics_df = pd.DataFrame(metrics)
+
+    # Monte Carlo sur le portefeuille Personnalisé (piloté par l’appétence)
+    def risk_controls(score):
+        vol_scale = float(np.interp(score, [1, 10], [0.6, 1.6]))
+        df_tail   = int(round(np.interp(score, [1, 10], [12, 4])))
+        mu_shift  = float(np.interp(score, [1, 10], [-0.01, 0.01]))
+        return vol_scale, df_tail, mu_shift
+
+    r_hist = port_returns["Personnalisé"].dropna()
+    if len(r_hist) < 10:
+        mc = {"paths": pd.DataFrame(), "summary": pd.DataFrame(), "metrics": {"note": "pas assez d'historique"}}
+    else:
+        mu = r_hist.mean() * dpy
+        vol = r_hist.std() * np.sqrt(dpy)
+        vol_scale, df_tail, mu_shift = risk_controls(appetence)
+
+        horizon_days = int(horizon_annees * (252 if profile["freq"]=="Daily" else 52))
+        n_paths = 2000
+
+        # génère des rendements annualisés puis reconvertit à la fréquence choisie
+        step_per_year = 252 if profile["freq"]=="Daily" else 52
+        step_mu  = (1+mu+mu_shift)**(1/step_per_year) - 1
+        step_vol = (vol * vol_scale) / np.sqrt(step_per_year)
+
+        np.random.seed(42)
+        shocks = np.random.standard_t(df_tail, size=(horizon_days, n_paths)) * (step_vol/np.sqrt(df_tail/(df_tail-2)))  # t->vol target
+        step_r = step_mu + shocks
+        nav = np.cumprod(1 + step_r, axis=0)
+        nav = pd.DataFrame(nav, index=pd.date_range(start=end_date, periods=horizon_days, freq=("B" if profile["freq"]=="Daily" else "W-FRI")))
+        nav.iloc[0,:] = 1.0  # base 1
+
+        # VaR/CVaR en $ à horizon
+        final_r = nav.iloc[-1,:] - 1.0
+        alpha = profile["var_conf"]
+        capital0 = investissement
+        q = np.quantile(final_r, 1-alpha)
+        var_cash = float(capital0 * -q)
+        cvar_cash = float(capital0 * -final_r[final_r <= q].mean())
+
+        mc = {
+            "paths": nav,
+            "summary": pd.DataFrame({
+                "P5": [np.quantile(final_r, 0.05)],
+                "P50": [np.quantile(final_r, 0.50)],
+                "P95": [np.quantile(final_r, 0.95)],
+                f"VaR {int(alpha*100)}% ($)": [var_cash],
+                f"CVaR {int(alpha*100)}% ($)": [cvar_cash],
+            }),
+            "metrics": {"mu_ann_hist": float(mu), "vol_ann_hist": float(vol),
+                        "vol_scale": vol_scale, "df": df_tail, "mu_shift": mu_shift}
+        }
+
+    results["backtest"] = {"returns": port_returns, "metrics_df": metrics_df}
+    results["mc"] = mc
     st.session_state["client_results"] = results
-    st.success("Entrées enregistrées. Hooks prêts pour l’implémentation des calculs.")
+    st.success("Backtest + Monte Carlo terminés.")
 
 # --- Affichage minimal des emplacements (placeholder) ------------------
 if "client_results" in st.session_state:
     res = st.session_state["client_results"]
 
-    tabs = []
-    names = []
-    if "backtest" in res: names.append("Backtest")
-    if "mc" in res: names.append("Monte Carlo")
-    if names:
-        tabs = st.tabs(names)
+    tabs = st.tabs(["Backtest", "Monte Carlo"])
 
-    if "backtest" in res:
-        with tabs[names.index("Backtest")]:
-            bk = res["backtest"]
-            st.line_chart(bk["nav"], height=220)
-            st.json(bk["metrics"])
-    if "mc" in res:
-        with tabs[names.index("Monte Carlo")]:
-            mc = res["mc"]
-            if "fan" in mc:
-                st.area_chart(mc["fan"], height=220)
-            st.dataframe(mc["summary"], use_container_width=True)
+    with tabs[0]:
+        st.subheader("Métriques (3 portefeuilles)")
+        st.dataframe(res["backtest"]["metrics_df"], use_container_width=True)
+
+        st.subheader("NAV (base 100)")
+        port_returns = res["backtest"]["returns"]
+        nav_df = pd.DataFrame({k: (1+v).cumprod()*100 for k,v in port_returns.items() if v is not None})
+        st.line_chart(nav_df)
+
+    with tabs[1]:
+        st.subheader("Résumé Monte Carlo")
+        st.dataframe(res["mc"]["summary"], use_container_width=True)
+        if not res["mc"]["paths"].empty:
+            st.subheader("Trajectoires simulées (échantillon)")
+            st.line_chart(res["mc"]["paths"].iloc[:, :50])  # 50 chemins pour lisibilité
 
 # --- Zone export (sera branchée sur vos générateurs PDF/DOCX) ----------
 st.divider()
