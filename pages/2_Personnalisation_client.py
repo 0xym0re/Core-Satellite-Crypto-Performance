@@ -301,45 +301,20 @@ with st.form("client_inputs"):
         bond = 1.0 - gold - eq
         return {"^GSPC": eq, "AGGG.L": max(0.0, bond), "GC=F": gold}
 
-    if prefill_clicked:
-        sw = suggested_weights_from_risk(appetence)
-        for i, (ticker, w) in enumerate(sw.items()):
-            st.session_state[f"cust_asset_{i}"] = asset_names_map.get(ticker, ticker)
-            st.session_state[f"cust_w_{i}"] = round(w*100, 1)
-        st.experimental_rerun()
-
-    st.divider()
-    rebal_mode = st.selectbox("Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"], index=1)
+    prefill_clicked = st.form_submit_button("🎚️ Pré-remplir les poids selon l’appétence")
+    submitted = st.form_submit_button("🚀 Lancer l’analyse personnalisée", use_container_width=True) 
+    if prefill_clicked: 
+        sw = suggested_weights_from_risk(appetence) 
+        for i, (ticker, w) in enumerate(sw.items()): 
+            st.session_state[f"cust_asset_{i}"] = asset_names_map.get(ticker, ticker) 
+            st.session_state[f"cust_w_{i}"] = round(w*100, 1) 
+        st.experimental_rerun() 
     
-    st.caption("Les champs ci-dessus ne déclenchent aucun calcul tant que vous n’avez pas cliqué sur **Lancer**.")
-
-    # ✅ Place les DEUX submits ici, une seule fois, avec des keys distinctes
-    col_btn1, col_btn2 = st.columns([1, 2])
-    with col_btn1:
-        prefill_clicked = st.form_submit_button("🎚️ Pré-remplir les poids selon l’appétence", key="prefill_btn")
-    with col_btn2:
-        submitted = st.form_submit_button("🚀 Lancer l’analyse personnalisée", key="run_btn", use_container_width=True)
-
-# ✅ Réagit au bouton de pré-remplissage : on rerun sans lancer les calculs
-if prefill_clicked and not submitted:
-    def suggested_weights_from_risk(score):
-        gold = 0.05
-        eq = np.interp(score, [1, 10], [0.20, 0.85])
-        bond = 1.0 - gold - eq
-        return {"^GSPC": eq, "AGGG.L": max(0.0, bond), "GC=F": gold}
-
-    # univers d'actifs pour retrouver le nom à partir du ticker
-    full_asset_mapping = {**asset_mapping, **crypto_static, **us_equity_mapping}
-    asset_names_map = {v: k for k, v in full_asset_mapping.items()}
-
-    sw = suggested_weights_from_risk(appetence)
-    for i, (ticker, w) in enumerate(sw.items()):
-        st.session_state[f"cust_asset_{i}"] = asset_names_map.get(ticker, ticker)
-        st.session_state[f"cust_w_{i}"] = round(w * 100, 1)
-    st.experimental_rerun()
-
-
-# --- Construction du profil (persisté en session) ----------------------
+    st.divider() 
+    rebal_mode = st.selectbox("Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"], index=1) 
+    st.caption("Les champs ci-dessus ne déclenchent aucun calcul tant que vous n’avez pas cliqué sur **Lancer**.") 
+    
+    # --- Construction du profil (persisté en session) ----------------------
 profile = {
     "patrimoine_total": patrimoine,
     "montant_investi": investissement,
