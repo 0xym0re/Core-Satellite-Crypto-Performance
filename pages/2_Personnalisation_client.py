@@ -8,6 +8,8 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 
+from io import StringIO
+from scipy.stats import norm
 from datetime import timedelta, datetime
 
 # --- Charte (mêmes codes que la page 1) --------------------------------
