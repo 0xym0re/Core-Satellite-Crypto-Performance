@@ -557,6 +557,31 @@ def make_portfolios_cum_png_mpl(nav_dict, title):
     fig.autofmt_xdate()
     fig.tight_layout()
     return mpl_fig_to_png_bytes(fig)
+
+def make_crypto_sleeve_vs_benchmark_png_mpl(df_all, benchmark_ticker, sleeve_nav, title):
+    df = df_all.ffill().bfill()
+    if sleeve_nav is None or sleeve_nav.empty or benchmark_ticker not in df.columns:
+        return None
+
+    # Aligne la poche crypto et le benchmark sur le même index
+    bench = df[benchmark_ticker].reindex(sleeve_nav.index).dropna()
+    s = sleeve_nav.reindex(bench.index).dropna()
+    if s.empty or bench.empty:
+        return None
+
+    bench_norm = bench / bench.iloc[0]
+    sleeve_norm = s / s.iloc[0]
+    rel = (sleeve_norm / bench_norm - 1.0) * 100.0  # en %
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(rel.index, rel.values, label="Poche Crypto (pondérée)", linewidth=1.8, color=PRIMARY)
+    ax.set_title(title, color="#222")
+    ax.set_ylabel("Sur/ss perf vs benchmark (%)")
+    ax.legend(fontsize=8, ncol=1)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return mpl_fig_to_png_bytes(fig)
+
 # ----------------------------------------------------------------------------------------
 # PDF report
 # ----------------------------------------------------------------------------------------
@@ -1134,8 +1159,8 @@ if st.button("🔎 Analyser"):
             ),
             "Perf relative vs benchmark": try_plotly_then_mpl(
                 "Perf relative vs benchmark", fig_rel,
-                lambda: make_relative_vs_benchmark_png_mpl(
-                    df, benchmark_ticker, asset_names_map,
+                lambda: make_crypto_sleeve_vs_benchmark_png_mpl(
+                    df, benchmark_ticker, sleeve_nav,
                     f"Poche crypto vs benchmark ({asset_names_map.get(benchmark_ticker, benchmark_ticker)}) {label_period}"
                 )
             ),
