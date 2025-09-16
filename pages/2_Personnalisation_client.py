@@ -241,78 +241,143 @@ st.markdown(
     "La page prépare les entrées pour un **backtest** et/ou une **simulation Monte Carlo**."
 )
 
-with st.form("client_inputs"):
-    st.subheader("1) Profil & Contraintes")
+st.subheader("1) Profil & Contraintes")
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        patrimoine = st.number_input("Patrimoine total (USD)", min_value=0.0, value=500_000.0, step=1_000.0, format="%.2f")
-        investissement = st.number_input("Montant investi (USD)", min_value=0.0, value=100_000.0, step=1_000.0, format="%.2f")
-    with c2:
-        horizon_annees = st.number_input("Horizon d’investissement (années)", min_value=1, value=5, step=1)
-        apports_annuels = st.number_input("Apports annuels (USD)", min_value=0.0, value=0.0, step=1_000.0, format="%.2f")
-    with c3:
-        appetence = st.slider("Appétence au risque", 1, 10, 5, help="1 = très prudent ; 10 = très dynamique")
-        dd_tol = st.slider("Tolérance drawdown max (%)", 5, 80, 30)
+c1, c2, c3 = st.columns(3)
+with c1:
+    patrimoine = st.number_input(
+        "Patrimoine total (USD)", min_value=0.0, value=500_000.0, step=1_000.0, format="%.2f",
+        help="Valeur totale du patrimoine du client (utile pour le contexte, ne change pas les calculs)."
+    )
+    investissement = st.number_input(
+        "Montant investi (USD)", min_value=0.0, value=100_000.0, step=1_000.0, format="%.2f",
+        help="Capital de départ utilisé pour le backtest et la simulation Monte Carlo (pour VaR/CVaR en $)."
+    )
+with c2:
+    horizon_annees = st.number_input(
+        "Horizon d’investissement (années)", min_value=1, value=5, step=1,
+        help="Durée d’investissement visée. Sert pour la longueur du backtest et l’horizon de la simulation."
+    )
+    apports_annuels = st.number_input(
+        "Apports annuels (USD)", min_value=0.0, value=0.0, step=1_000.0, format="%.2f",
+        help="(Optionnel) Versements annuels supplémentaires. (Non utilisés pour l’instant dans le calcul.)"
+    )
+with c3:
+    appetence = st.slider(
+        "Appétence au risque", 1, 10, 5,
+        help="1 = très prudent (faible risque) ; 10 = très dynamique (risque plus élevé)."
+    )
+    dd_tol = st.slider(
+        "Tolérance drawdown max (%)", 5, 80, 30,
+        help="Borne indicative sur la perte max tolérée (pas encore utilisée pour contraindre le portefeuille)."
+    )
 
-    st.divider()
-    st.subheader("2) Paramètres d’estimation")
+st.divider()
+st.subheader("2) Paramètres d’estimation")
 
-    c4, c5 = st.columns(2)
-    with c4:
-        var_conf = st.slider("Confiance VaR/CVaR", 0.80, 0.995, 0.95, 0.005)
-    with c5:
-        freq = st.selectbox("Fréquence de calcul", ["Daily", "Weekly"], index=0)
+c4, c5 = st.columns(2)
+with c4:
+    var_conf = st.slider(
+        "Confiance VaR/CVaR", 0.80, 0.995, 0.95, 0.005,
+        help="Niveau de confiance pour la VaR/CVaR. 0.95 = perte dépassée dans 5% des cas."
+    )
+with c5:
+    freq = st.selectbox(
+        "Fréquence de calcul", ["Daily", "Weekly"], index=0,
+        help="Fréquence des rendements/échantillonnage : 'Daily' ≈ 252 j/an ; 'Weekly' ≈ 52 sem/an."
+    )
 
-    st.divider()
-    st.subheader("3) Portefeuille & Monte Carlo")
+st.divider()
+st.subheader("3) Portefeuille personnalisé (live)")
 
-    # Univers d'actifs (identique page 1)
-    full_asset_mapping = {**asset_mapping, **crypto_static, **us_equity_mapping}
-    asset_names_map = {v: k for k, v in full_asset_mapping.items()}
+# Univers d'actifs
+full_asset_mapping = {**asset_mapping, **crypto_static, **us_equity_mapping}
+asset_names_map = {v: k for k, v in full_asset_mapping.items()}
 
-    n_assets = st.number_input("Nombre d'actifs dans le portefeuille", 1, 20, 3, 1)
-    custom_alloc_pairs = []
-    used = set()
+# Nombre d'actifs & éditeur de poids (hors form -> feedback live)
+n_assets = st.number_input(
+    "Nombre d'actifs dans le portefeuille", 1, 20, 3, 1,
+    help="Ajoute des lignes pour sélectionner les actifs et leurs poids."
+)
+custom_alloc_pairs = []
+used = set()
 
-    cols = st.columns([3, 1])
-    for i in range(int(n_assets)):
-        with cols[0]:
-            choice = st.selectbox(
-                f"Actif {i+1}",
-                list(full_asset_mapping.keys()),
-                key=f"cust_asset_{i}"
-            )
-        with cols[1]:
-            w = st.number_input(f"% poids {i+1}", 0.0, 100.0, 0.0, 0.1, key=f"cust_w_{i}")
-        if choice in full_asset_mapping and full_asset_mapping[choice] not in used:
-            custom_alloc_pairs.append((full_asset_mapping[choice], w/100.0))
-            used.add(full_asset_mapping[choice])
+for i in range(int(n_assets)):
+    cA, cB = st.columns([3, 1])
+    with cA:
+        choice = st.selectbox(
+            f"Actif {i+1}",
+            list(full_asset_mapping.keys()),
+            key=f"cust_asset_{i}",
+            help="Choisis l’actif par son nom. Les données viennent de Yahoo Finance."
+        )
+    with cB:
+        w = st.number_input(
+            f"% poids {i+1}", 0.0, 100.0, 0.0, 0.1, key=f"cust_w_{i}",
+            help="Poids de l’actif dans le portefeuille (en %). La somme doit être 100%."
+        )
+    if choice in full_asset_mapping and full_asset_mapping[choice] not in used:
+        custom_alloc_pairs.append((full_asset_mapping[choice], w/100.0))
+        used.add(full_asset_mapping[choice])
 
-    sum_w = sum(w for _, w in custom_alloc_pairs)*100
-    if not np.isclose(sum_w, 100.0, atol=0.01):
-        st.warning(f"⚠️ La somme des poids est {sum_w:.2f}%, elle doit être 100%.")
-    custom_alloc = {t: w for t, w in custom_alloc_pairs if w > 0}
+# Feedback live sur la somme des poids
+sum_w = round(sum(w for _, w in custom_alloc_pairs)*100, 2)
+if np.isclose(sum_w, 100.0, atol=0.01):
+    st.success("✅ La somme des poids est bien de 100%.")
+else:
+    st.warning(f"⚠️ La somme des poids est de {sum_w:.2f}%, elle doit être 100%.")
 
-    # Option : bouton de pré-remplissage par appétence
-    def suggested_weights_from_risk(score):
-        gold = 0.05
-        eq = np.interp(score, [1, 10], [0.20, 0.85])
-        bond = 1.0 - gold - eq
-        return {"^GSPC": eq, "AGGG.L": max(0.0, bond), "GC=F": gold}
+custom_alloc = {t: w for t, w in custom_alloc_pairs if w > 0}
 
-    prefill_clicked = st.form_submit_button("🎚️ Pré-remplir les poids selon l’appétence")
-    submitted = st.form_submit_button("🚀 Lancer l’analyse personnalisée", use_container_width=True) 
-    if prefill_clicked: 
-        sw = suggested_weights_from_risk(appetence) 
-        for i, (ticker, w) in enumerate(sw.items()): 
-            st.session_state[f"cust_asset_{i}"] = asset_names_map.get(ticker, ticker) 
-            st.session_state[f"cust_w_{i}"] = round(w*100, 1) 
-        st.experimental_rerun() 
-    
-    st.divider() 
-    rebal_mode = st.selectbox("Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"], index=1) 
-    st.caption("Les champs ci-dessus ne déclenchent aucun calcul tant que vous n’avez pas cliqué sur **Lancer**.") 
+# Bouton de pré-remplissage par appétence (hors form -> réactif)
+def suggested_weights_from_risk(score: int):
+    gold = 0.05
+    eq = float(np.interp(score, [1, 10], [0.20, 0.85]))
+    bond = 1.0 - gold - eq
+    return {"^GSPC": eq, "AGGG.L": max(0.0, bond), "GC=F": gold}
+
+if st.button("🎚️ Pré-remplir selon l’appétence"):
+    sw = suggested_weights_from_risk(appetence)
+    for i, (ticker, w) in enumerate(sw.items()):
+        st.session_state[f"cust_asset_{i}"] = asset_names_map.get(ticker, ticker)
+        st.session_state[f"cust_w_{i}"] = round(w*100, 1)
+    st.rerun()
+
+st.divider()
+st.subheader("4) Backtest & Monte Carlo — options")
+
+# Backtest
+rebal_mode = st.selectbox(
+    "Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"], index=1,
+    help="Buy&Hold = pas de rééquilibrage ; Monthly/Quarterly = rééquilibrage périodique aux poids cibles."
+)
+
+# Monte Carlo
+mc_model = st.selectbox(
+    "Modèle Monte Carlo",
+    ["GBM (normal i.i.d.)", "Block bootstrap"],
+    index=0,
+    help="GBM: tirages normaux i.i.d. calibrés sur mu/sigma historiques. "
+         "Block bootstrap: ré-échantillonnage par blocs des rendements historiques (préserve des dépendances locales)."
+)
+mc_paths = st.number_input(
+    "N (nombre de chemins)", 100, 20000, 2000, 100,
+    help="Nombre de trajectoires simulées. 2 000–10 000 = compromis précision/temps."
+)
+seed = st.number_input(
+    "Seed (graine aléatoire)", 0, 10**6, 42, 1,
+    help="Pour rendre les simulations reproductibles."
+)
+if mc_model == "Block bootstrap":
+    mc_block = st.number_input(
+        "Taille de bloc (jours/semaines)", 5, 60, 20, 1,
+        help="Longueur des blocs consécutifs rééchantillonnés. Plus grand = plus d’autocorrélations conservées."
+    )
+else:
+    mc_block = 20  # non utilisé en GBM
+
+# Bouton RUN (hors form)
+run_clicked = st.button("🚀 Lancer l’analyse personnalisée", use_container_width=True)
     
     # --- Construction du profil (persisté en session) ----------------------
 profile = {
