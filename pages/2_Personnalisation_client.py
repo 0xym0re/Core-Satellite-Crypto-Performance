@@ -1,7 +1,5 @@
 # pages/2_Personnalisation_client.py
 # ---------------------------------------------------------------------
-# Personnalisation client — SQUELETTE (UI + hooks, sans calculs)
-# ---------------------------------------------------------------------
 
 import streamlit as st
 import pandas as pd
