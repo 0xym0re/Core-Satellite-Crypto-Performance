@@ -96,7 +96,34 @@ def _heatmap_cmap():
     except Exception:
         return "viridis"
 
-
+# ----------------------------------------------------------------------------------------
+# Crypto list dynamique
+# ----------------------------------------------------------------------------------------
+@st.cache_data(ttl=24*3600, show_spinner=False)
+def build_crypto_mapping_dynamic(min_mcap_usd=2e8, pages=4):
+    out = {}
+    session = requests.Session()
+    for page in range(1, pages+1):
+        url = ("https://api.coingecko.com/api/v3/coins/markets"
+               f"?vs_currency=usd&order=market_cap_desc&per_page=250&page={page}")
+        r = session.get(url, timeout=15)
+        if r.status_code != 200: break
+        arr = r.json()
+        if not arr: break
+        for it in arr:
+            mcap = it.get("market_cap")
+            if mcap is None or mcap < min_mcap_usd: continue
+            name = it.get("name","").strip()
+            sym = (it.get("symbol","") or "").upper()
+            if not sym: continue
+            y_ticker = f"{sym}-USD"
+            try:
+                hist = yf.Ticker(y_ticker).history(period="5d")
+                if hist is None or hist.empty: continue
+                out[f"{name} ({sym})"] = y_ticker
+            except Exception:
+                continue
+    return out
 # Si tu gardes l’option "liste crypto dynamique", garde la logique existante
 crypto_mapping = build_crypto_mapping_dynamic() if use_dynamic_crypto else crypto_static
 
@@ -837,33 +864,7 @@ with st.sidebar:
     include_pdf = st.checkbox("Générer un rapport PDF à l'export", value=True)
 
 # ----------------------------------------------------------------------------------------
-# Crypto list dynamique
-# ----------------------------------------------------------------------------------------
-@st.cache_data(ttl=24*3600, show_spinner=False)
-def build_crypto_mapping_dynamic(min_mcap_usd=2e8, pages=4):
-    out = {}
-    session = requests.Session()
-    for page in range(1, pages+1):
-        url = ("https://api.coingecko.com/api/v3/coins/markets"
-               f"?vs_currency=usd&order=market_cap_desc&per_page=250&page={page}")
-        r = session.get(url, timeout=15)
-        if r.status_code != 200: break
-        arr = r.json()
-        if not arr: break
-        for it in arr:
-            mcap = it.get("market_cap")
-            if mcap is None or mcap < min_mcap_usd: continue
-            name = it.get("name","").strip()
-            sym = (it.get("symbol","") or "").upper()
-            if not sym: continue
-            y_ticker = f"{sym}-USD"
-            try:
-                hist = yf.Ticker(y_ticker).history(period="5d")
-                if hist is None or hist.empty: continue
-                out[f"{name} ({sym})"] = y_ticker
-            except Exception:
-                continue
-    return out
+
 
 st.markdown("## 💼 Composition du portefeuille crypto")
 use_dynamic_crypto = st.checkbox(
