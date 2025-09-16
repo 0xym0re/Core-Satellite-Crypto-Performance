@@ -13,3 +13,4 @@ pillow>=10.3            # NEW (logo PDF, ratio)
 python-docx==0.8.11
 # Assure des wheels compatibles pour Py3.12+
 lxml>=5.1.0
+scipy>=1.10
