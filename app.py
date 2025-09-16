@@ -676,6 +676,10 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
         ]))
         elements.append(table)
 
+        # 👇 AJOUT : espace + saut de page si des graphiques suivent
+        elements.append(Spacer(1, 0.3*cm))
+        if charts_dict:              # évite une page blanche quand il n'y a pas de graph
+            elements.append(PageBreak())
     
     # Graphiques
     _ = ensure_kaleido()  # pré-check soft
@@ -847,6 +851,11 @@ def generate_docx_report(company_name, logo_bytes, charts_dict, metrics_df, comp
                     for run in p.runs:
                         run.font.name = "Calibri"
                         run.font.size = Pt(10)
+
+        # 👇 AJOUT : saut de page avant la section Graphiques
+        if charts_dict:          # évite une page blanche s'il n'y a pas de graph
+            doc.add_page_break()
+
 
     # 2) Graphiques ensuite
     for name, fig_or_png in charts_dict.items():
