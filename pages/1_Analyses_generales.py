@@ -28,6 +28,7 @@ from reportlab.platypus import Table, TableStyle, Paragraph, SimpleDocTemplate, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import PageBreak
 from PIL import Image as PILImage
+from pages.shared_assets import asset_mapping, crypto_static, us_equity_mapping
 
 # ----------------------------------------------------------------------------------------
 # Utils
