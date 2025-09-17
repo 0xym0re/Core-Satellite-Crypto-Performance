@@ -260,7 +260,7 @@ with c2:
         help="Durée d’investissement visée. Sert pour la longueur du backtest et l’horizon de la simulation."
     )
     apports_annuels = st.number_input(
-        "Apports annuels (USD)", min_value=0.0, value=0.0, step=1_000.0, format="%.2f",
+        "Versement complémentaires (USD)", min_value=0.0, value=0.0, step=1_000.0, format="%.2f",
         help="(Optionnel) Versements annuels supplémentaires. (Non utilisés pour l’instant dans le calcul.)"
     )
 with c3:
@@ -289,7 +289,7 @@ with c5:
     )
 
 st.divider()
-st.subheader("3) Portefeuille personnalisé (live)")
+st.subheader("Patrimoine du client")
 
 # Univers d'actifs
 full_asset_mapping = {**asset_mapping, **crypto_static, **us_equity_mapping}
@@ -345,7 +345,7 @@ if st.button("🎚️ Pré-remplir selon l’appétence"):
     st.rerun()
 
 st.divider()
-st.subheader("4) Backtest & Monte Carlo — options")
+st.subheader("Backtest & Monte Carlo — réglages")
 
 # Backtest
 rebal_mode = st.selectbox(
