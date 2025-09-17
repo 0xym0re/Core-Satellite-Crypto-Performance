@@ -484,46 +484,23 @@ if "client_results" in st.session_state:
         st.subheader("Métriques (3 portefeuilles)")
         st.dataframe(res["backtest"]["metrics_df"], use_container_width=True)
         
-        # --- Composition détaillée du portefeuille personnalisé ---------------
-        st.markdown("**Portefeuille personnalisé — composition (%)**")
+            # --- Compositions (présentation façon page 1) ---
         ports_saved = res["backtest"].get("ports", {})
-        custom_alloc_saved = ports_saved.get("Personnalisé", {})
-
-        if custom_alloc_saved:
-            comp_personnalise = pd.DataFrame(
-                [
-                    {
-                        "Nom": asset_names_map.get(t, t),
-                        "Ticker": t,
-                        "Poids (%)": round(w * 100.0, 2),
-                    }
-                    for t, w in sorted(custom_alloc_saved.items(), key=lambda x: x[1], reverse=True)
-                ]
-            )
-            st.dataframe(comp_personnalise, use_container_width=True)
-        else:
-            st.info("Pas d'allocation personnalisée à afficher.")
-
-        # --- Tableau comparatif des 3 portefeuilles ---------------------------
         if ports_saved:
-            st.markdown("**Comparatif — Poids (%) par portefeuille**")
-            # Liste de tous les tickers présents dans au moins un portefeuille
-            all_tickers = sorted({t for alloc in ports_saved.values() for t in alloc.keys()})
-            data_rows = []
-            for t in all_tickers:
-                row = {
-                    "Nom": asset_names_map.get(t, t),
-                    "Ticker": t,
-                }
-                for pname, alloc in ports_saved.items():
-                    row[pname] = round(alloc.get(t, 0.0) * 100.0, 2)
-                data_rows.append(row)
+            def alloc_to_text(alloc):
+                items = []
+                for t, w in sorted(alloc.items(), key=lambda x: -x[1]):
+                    if w <= 0: 
+                        continue
+                    items.append(f"{asset_names_map.get(t, t)} {w*100:.1f}%")
+                return ", ".join(items)
 
-            comp_all = pd.DataFrame(data_rows)
-            # Option : trier par poids perso desc si présent
-            if "Personnalisé" in comp_all.columns:
-                comp_all = comp_all.sort_values(by="Personnalisé", ascending=False)
-            st.dataframe(comp_all, use_container_width=True)
+            comp_lines = []
+            for name, alloc in ports_saved.items():
+                comp_lines.append(f"<b>{name}</b> : {alloc_to_text(alloc)}")
+
+            st.markdown("**Compositions :**<br>" + "<br>".join(comp_lines), unsafe_allow_html=True)
+
             
         st.subheader("Performance du patrimoine contre les deux portefeuilles Benchmark")
         port_returns = res["backtest"]["returns"]
