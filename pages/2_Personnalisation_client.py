@@ -9,6 +9,7 @@ import yfinance as yf
 from io import StringIO
 from scipy.stats import norm
 from datetime import timedelta, date
+from math import sqrt
 from pages.shared_assets import asset_mapping, crypto_static, us_equity_mapping
 from pages.shared_quant import (
     download_prices, portfolio_daily_returns, compute_metrics_from_returns
