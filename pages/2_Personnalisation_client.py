@@ -324,7 +324,7 @@ else:
 custom_alloc = {t: w for t, w in custom_alloc_pairs if w > 0}
 
 # --- Poche crypto (financée par "Montant investi (USD)") -------------------
-st.markdown("### Allocation crypto (appliquée au **Montant investi (USD)")
+st.markdown("### Allocation crypto appliquée au Montant investi")
 crypto_tickers_set = set(crypto_static.values())  # pour filtrer la base non-crypto
 
 nb_crypto = st.number_input("Nombre d'actifs crypto", 0, 15, 0, 1,
