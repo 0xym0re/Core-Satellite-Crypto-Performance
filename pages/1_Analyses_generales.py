@@ -29,8 +29,6 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import PageBreak
 from PIL import Image as PILImage
 from pages.shared_assets import asset_mapping, crypto_static, us_equity_mapping
-import pages.shared_assets as SA
-st.caption(f"shared_assets chargé depuis : {SA.__file__}")
 
 
 # ----------------------------------------------------------------------------------------
@@ -867,14 +865,6 @@ crypto_mapping = build_crypto_mapping_dynamic() if use_dynamic_crypto else crypt
 
 full_asset_mapping = {**asset_mapping, **crypto_mapping, **us_equity_mapping}
 asset_names_map = {v: k for k, v in full_asset_mapping.items()}
-
-with st.expander("🧪 Debug PMEH", expanded=False):
-    key_pmeh = "Amundi PEA Immobilier Europe (PMEH)"
-    st.write("Clé PMEH dans asset_mapping :", "✅" if key_pmeh in asset_mapping else "❌")
-    st.write("Clé PMEH dans full_asset_mapping :", "✅" if key_pmeh in full_asset_mapping else "❌")
-    st.write("Ticker attendu :", full_asset_mapping.get(key_pmeh, None))
-    st.write("Nb d’actifs total :", len(full_asset_mapping))
-
 
 crypto_tickers_set = set(crypto_mapping.values())
 traditional_tickers_set = set(asset_mapping.values()) | set(us_equity_mapping.values())
