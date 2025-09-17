@@ -439,7 +439,14 @@ if run_clicked:
     # Monte Carlo (calibré sur l'historique du portefeuille personnalisé)
     mc = run_monte_carlo(profile)
 
-    st.session_state["client_results"] = {"backtest": {"returns": port_returns, "metrics_df": metrics_df}, "mc": mc}
+    st.session_state["client_results"] = {
+    "backtest": {
+        "returns": port_returns,
+        "metrics_df": metrics_df,
+        "ports": ports,  # <-- on stocke les allocations
+    },
+    "mc": mc
+}
 
     # --- Contrôle de cohérence vs objectif choisi ---------------------------
     r_person = port_returns["Personnalisé"].dropna()
@@ -476,8 +483,49 @@ if "client_results" in st.session_state:
     with tabs[0]:
         st.subheader("Métriques (3 portefeuilles)")
         st.dataframe(res["backtest"]["metrics_df"], use_container_width=True)
+        
+        # --- Composition détaillée du portefeuille personnalisé ---------------
+        st.markdown("**Portefeuille personnalisé — composition (%)**")
+        ports_saved = res["backtest"].get("ports", {})
+        custom_alloc_saved = ports_saved.get("Personnalisé", {})
 
-        st.subheader("NAV (base 100)")
+        if custom_alloc_saved:
+            comp_personnalise = pd.DataFrame(
+                [
+                    {
+                        "Nom": asset_names_map.get(t, t),
+                        "Ticker": t,
+                        "Poids (%)": round(w * 100.0, 2),
+                    }
+                    for t, w in sorted(custom_alloc_saved.items(), key=lambda x: x[1], reverse=True)
+                ]
+            )
+            st.dataframe(comp_personnalise, use_container_width=True)
+        else:
+            st.info("Pas d'allocation personnalisée à afficher.")
+
+        # --- Tableau comparatif des 3 portefeuilles ---------------------------
+        if ports_saved:
+            st.markdown("**Comparatif — Poids (%) par portefeuille**")
+            # Liste de tous les tickers présents dans au moins un portefeuille
+            all_tickers = sorted({t for alloc in ports_saved.values() for t in alloc.keys()})
+            data_rows = []
+            for t in all_tickers:
+                row = {
+                    "Nom": asset_names_map.get(t, t),
+                    "Ticker": t,
+                }
+                for pname, alloc in ports_saved.items():
+                    row[pname] = round(alloc.get(t, 0.0) * 100.0, 2)
+                data_rows.append(row)
+
+            comp_all = pd.DataFrame(data_rows)
+            # Option : trier par poids perso desc si présent
+            if "Personnalisé" in comp_all.columns:
+            c    omp_all = comp_all.sort_values(by="Personnalisé", ascending=False)
+            st.dataframe(comp_all, use_container_width=True)
+            
+        st.subheader("Performance du patrimoine contre les deux portefeuilles Benchmark")
         port_returns = res["backtest"]["returns"]
         nav_df = pd.DataFrame({k: (1+v).cumprod()*100 for k,v in port_returns.items() if v is not None})
         st.line_chart(nav_df)
