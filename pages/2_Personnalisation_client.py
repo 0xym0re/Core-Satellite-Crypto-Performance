@@ -442,28 +442,28 @@ if run_clicked:
     st.session_state["client_results"] = {"backtest": {"returns": port_returns, "metrics_df": metrics_df}, "mc": mc}
 
     # --- Contrôle de cohérence vs objectif choisi ---------------------------
-r_person = port_returns["Personnalisé"].dropna()
-if len(r_person) > 0:
-    # CAGR annuel au pas sélectionné
-    cagr = (1.0 + r_person).prod() ** (dpy / len(r_person)) - 1.0
-    # Max drawdown historique
-    _, max_dd = drawdown_stats(r_person)  # max_dd négatif (ex: -0.32 => -32%)
-    max_dd_pct = abs(float(max_dd)) * 100.0
+    r_person = port_returns["Personnalisé"].dropna()
+    if len(r_person) > 0:
+        # CAGR annuel au pas sélectionné
+        cagr = (1.0 + r_person).prod() ** (dpy / len(r_person)) - 1.0
+        # Max drawdown historique
+        _, max_dd = drawdown_stats(r_person)  # max_dd négatif (ex: -0.32 => -32%)
+        max_dd_pct = abs(float(max_dd)) * 100.0
 
-    if profile["objective"] == "MDD":
-        ok = (max_dd_pct <= float(profile["dd_tolerance_pct"]))
-        msg = f"Max drawdown observé : {max_dd_pct:.1f}%  |  Tolérance : {profile['dd_tolerance_pct']:.0f}%."
-    else:
-        target = float(profile["expected_return_annual"]) * 100.0
-        ok = (cagr * 100.0 >= target)
-        msg = f"CAGR observé : {cagr*100.0:.1f}%  |  Objectif : {target:.1f}%."
+        if profile["objective"] == "MDD":
+            ok = (max_dd_pct <= float(profile["dd_tolerance_pct"]))
+            msg = f"Max drawdown observé : {max_dd_pct:.1f}%  |  Tolérance : {profile['dd_tolerance_pct']:.0f}%."
+        else:
+            target = float(profile["expected_return_annual"]) * 100.0
+            ok = (cagr * 100.0 >= target)
+            msg = f"CAGR observé : {cagr*100.0:.1f}%  |  Objectif : {target:.1f}%."
 
-    if ok:
-        st.success("✅ Cohérent — " + msg)
+        if ok:
+            st.success("✅ Cohérent — " + msg)
+        else:
+            st.error("❌ Non cohérent — " + msg)
     else:
-        st.error("❌ Non cohérent — " + msg)
-else:
-    st.warning("Pas assez d’historique pour effectuer le contrôle de cohérence.")
+        st.warning("Pas assez d’historique pour effectuer le contrôle de cohérence.")
 
     st.success("Backtest + Monte Carlo terminés.")
 
