@@ -323,6 +323,39 @@ else:
 
 custom_alloc = {t: w for t, w in custom_alloc_pairs if w > 0}
 
+# --- Poche crypto (financée par "Montant investi (USD)") -------------------
+st.markdown("### Allocation crypto (appliquée au **Montant investi (USD)**)")
+crypto_tickers_set = set(crypto_static.values())  # pour filtrer la base non-crypto
+
+nb_crypto = st.number_input("Nombre d'actifs crypto", 0, 15, 0, 1,
+                            help="Sélectionne les cryptoactifs à acheter avec le Montant investi.")
+crypto_pairs = []
+for i in range(int(nb_crypto)):
+    c1_, c2_ = st.columns([3, 1])
+    with c1_:
+        cchoice = st.selectbox(
+            f"Crypto {i+1}",
+            list(crypto_static.keys()),
+            key=f"crypto_sel_{i}",
+            help="Uniquement des cryptoactifs (liste statique)."
+        )
+    with c2_:
+        cw = st.number_input(
+            f"% crypto {i+1}", 0.0, 100.0, 0.0, 0.1,
+            key=f"crypto_w_{i}",
+            help="Répartition de la poche crypto (somme ≈ 100%)."
+        )
+    if cchoice in crypto_static:
+        crypto_pairs.append((crypto_static[cchoice], cw/100.0))
+
+sum_cw = round(sum(w for _, w in crypto_pairs)*100, 2)
+if nb_crypto > 0:
+    if np.isclose(sum_cw, 100.0, atol=0.01):
+        st.success("✅ La somme des poids crypto est bien de 100%.")
+    else:
+        st.warning(f"⚠️ La somme des poids crypto est de {sum_cw:.2f}%, elle doit être ≈ 100%.")
+crypto_alloc = {t: w for t, w in crypto_pairs if w > 0}
+
 st.divider()
 st.subheader("Paramètres d’estimation")
 
@@ -411,8 +444,8 @@ if run_clicked:
     bench_60_40 = {"^GSPC": 0.60, "AGGG.L": 0.40}
     bench_60_40_gold = {"^GSPC": 0.57, "AGGG.L": 0.38, "GC=F": 0.05}
 
-    # Tickers à télécharger (custom + benchmarks)
-    all_tickers = set(custom_alloc.keys()) | set(bench_60_40.keys()) | set(bench_60_40_gold.keys())
+    # Tickers à télécharger (custom + crypto + benchmarks)
+    all_tickers = set(custom_alloc.keys()) | set(crypto_alloc.keys()) | set(bench_60_40.keys()) | set(bench_60_40_gold.keys())
     df = download_prices(sorted(all_tickers), start_date, end_date)
 
     # Fréquence
@@ -423,9 +456,52 @@ if run_clicked:
         dpy = 52
         dfA = df.resample("W-FRI").last().ffill()
 
-    # Backtest (3 portefeuilles)
-    ports = {"Personnalisé": custom_alloc, "60/40": bench_60_40, "60/40 + 5% Or": bench_60_40_gold}
-    port_returns = {name: portfolio_daily_returns(dfA, alloc, rebal_mode) for name, alloc in ports.items()}
+    # ------------------ 4 PORTEFEUILLES ------------------
+    # 1) Patrimoine (hors crypto) : on retire les tickers crypto de l'allocation "custom"
+    base_alloc_non_crypto = {t: w for t, w in custom_alloc.items() if t not in crypto_tickers_set}
+    s_base = sum(base_alloc_non_crypto.values())
+    if s_base > 0:
+        base_alloc_non_crypto = {t: w/s_base for t, w in base_alloc_non_crypto.items()}  # renormalise 100%
+
+    r_base = portfolio_daily_returns(dfA, base_alloc_non_crypto, rebal_mode) if base_alloc_non_crypto else pd.Series(dtype=float)
+
+    # 2) Poche crypto (financée par 'investissement' en $)
+    r_crypto = portfolio_daily_returns(dfA, crypto_alloc, rebal_mode) if crypto_alloc else pd.Series(dtype=float)
+
+    # NAV en $ pour combiner patrimoine et crypto selon les montants saisis
+    def nav_usd_from_returns(r, capital0):
+        if r is None or r.empty or capital0 <= 0:
+            return pd.Series(dtype=float)
+        nav = (1 + r).cumprod() * float(capital0)
+        nav.name = "NAV"
+        return nav
+
+    nav_base_usd = nav_usd_from_returns(r_base, patrimoine)
+    nav_crypto_usd = nav_usd_from_returns(r_crypto, investissement)
+
+    # Portefeuille 2 = Patrimoine + Crypto (overlay en $)
+    if not nav_base_usd.empty and not nav_crypto_usd.empty:
+        idx = nav_base_usd.index.intersection(nav_crypto_usd.index)
+        nav_combined = nav_base_usd.reindex(idx).ffill() + nav_crypto_usd.reindex(idx).ffill()
+        r_combined = nav_combined.pct_change().dropna()
+    elif not nav_base_usd.empty:
+        r_combined = r_base.copy()
+    elif not nav_crypto_usd.empty:
+        r_combined = r_crypto.copy()
+    else:
+        r_combined = pd.Series(dtype=float)
+
+    # 3) 60/40  |  4) 60/40 + 5% Or
+    r_60_40 = portfolio_daily_returns(dfA, bench_60_40, rebal_mode)
+    r_60_40_gold = portfolio_daily_returns(dfA, bench_60_40_gold, rebal_mode)
+
+    # Dictionnaire des retours (pour tableaux/graphs)
+    port_returns = {
+        "Patrimoine (hors crypto)": r_base,
+        "Patrimoine + Crypto (overlay)": r_combined,
+        "60/40": r_60_40,
+        "60/40 + 5% Or": r_60_40_gold
+    }
 
     # Metrics
     metrics = {}
@@ -436,6 +512,32 @@ if run_clicked:
         )
     metrics_df = pd.DataFrame(metrics)
 
+    # Compositions affichées (style page 1)
+    def alloc_to_text(alloc):
+        items = []
+        for t, w in sorted(alloc.items(), key=lambda x: -x[1]):
+            if w <= 0: continue
+            items.append(f"{asset_names_map.get(t, t)} {w*100:.1f}%")
+        return ", ".join(items)
+
+    # Composition capital-pondérée du portefeuille "Patrimoine + Crypto"
+    tot_cap = float(patrimoine) + float(investissement)
+    w_base_cap = (float(patrimoine)/tot_cap) if tot_cap > 0 else 0.0
+    w_crypto_cap = (float(investissement)/tot_cap) if tot_cap > 0 else 0.0
+
+    combined_alloc = {}
+    for t, w in base_alloc_non_crypto.items():
+        combined_alloc[t] = combined_alloc.get(t, 0.0) + w_base_cap * w
+    for t, w in crypto_alloc.items():
+        combined_alloc[t] = combined_alloc.get(t, 0.0) + w_crypto_cap * w
+
+    ports = {
+        "Patrimoine (hors crypto)": base_alloc_non_crypto,
+        "Patrimoine + Crypto (overlay)": combined_alloc,
+        "60/40": bench_60_40,
+        "60/40 + 5% Or": bench_60_40_gold
+    }
+    
     # Monte Carlo (calibré sur l'historique du portefeuille personnalisé)
     mc = run_monte_carlo(profile)
 
@@ -443,20 +545,17 @@ if run_clicked:
     "backtest": {
         "returns": port_returns,
         "metrics_df": metrics_df,
-        "ports": ports,  # <-- on stocke les allocations
-    },
-    "mc": mc
-}
+        "ports": ports},  # <-- on stocke les allocations
+         "mc": mc
+    }
 
     # --- Contrôle de cohérence vs objectif choisi ---------------------------
-    r_person = port_returns["Personnalisé"].dropna()
-    if len(r_person) > 0:
-        # CAGR annuel au pas sélectionné
-        cagr = (1.0 + r_person).prod() ** (dpy / len(r_person)) - 1.0
-        # Max drawdown historique
-        _, max_dd = drawdown_stats(r_person)  # max_dd négatif (ex: -0.32 => -32%)
+    # --- Contrôle de cohérence vs objectif choisi ---------------------------
+    r_check = port_returns["Patrimoine + Crypto (overlay)"].dropna()
+    if len(r_check) > 0:
+        cagr = (1.0 + r_check).prod() ** (dpy / len(r_check)) - 1.0
+        _, max_dd = drawdown_stats(r_check)
         max_dd_pct = abs(float(max_dd)) * 100.0
-
         if profile["objective"] == "MDD":
             ok = (max_dd_pct <= float(profile["dd_tolerance_pct"]))
             msg = f"Max drawdown observé : {max_dd_pct:.1f}%  |  Tolérance : {profile['dd_tolerance_pct']:.0f}%."
@@ -464,11 +563,7 @@ if run_clicked:
             target = float(profile["expected_return_annual"]) * 100.0
             ok = (cagr * 100.0 >= target)
             msg = f"CAGR observé : {cagr*100.0:.1f}%  |  Objectif : {target:.1f}%."
-
-        if ok:
-            st.success("✅ Cohérent — " + msg)
-        else:
-            st.error("❌ Non cohérent — " + msg)
+        st.success("✅ Cohérent — " + msg) if ok else st.error("❌ Non cohérent — " + msg)
     else:
         st.warning("Pas assez d’historique pour effectuer le contrôle de cohérence.")
 
@@ -481,7 +576,7 @@ if "client_results" in st.session_state:
     tabs = st.tabs(["Backtest", "Monte Carlo"])
 
     with tabs[0]:
-        st.subheader("Métriques (3 portefeuilles)")
+        st.subheader("Métriques (4 portefeuilles)")
         st.dataframe(res["backtest"]["metrics_df"], use_container_width=True)
         
             # --- Compositions (présentation façon page 1) ---
