@@ -545,7 +545,7 @@ if run_clicked:
         "backtest": {
             "returns": port_returns,
             "metrics_df": metrics_df,
-            "ports": ports},
+            "ports": ports,
         },# <-- on stocke les allocations
         "mc": mc     
     }
