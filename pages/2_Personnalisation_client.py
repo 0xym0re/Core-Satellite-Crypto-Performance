@@ -542,11 +542,12 @@ if run_clicked:
     mc = run_monte_carlo(profile)
 
     st.session_state["client_results"] = {
-    "backtest": {
-        "returns": port_returns,
-        "metrics_df": metrics_df,
-        "ports": ports},  # <-- on stocke les allocations
-         "mc": mc
+        "backtest": {
+            "returns": port_returns,
+            "metrics_df": metrics_df,
+            "ports": ports},
+        },# <-- on stocke les allocations
+        "mc": mc     
     }
 
     # --- Contrôle de cohérence vs objectif choisi ---------------------------
@@ -573,9 +574,9 @@ if run_clicked:
 if "client_results" in st.session_state:
     res = st.session_state["client_results"]
 
-    tabs = st.tabs(["Backtest", "Monte Carlo"])
+    tab_backtest, tab_mc = st.tabs(["Backtest", "Monte Carlo"])
 
-    with tabs[0]:
+    with tab_backtest:
         st.subheader("Métriques (4 portefeuilles)")
         st.dataframe(res["backtest"]["metrics_df"], use_container_width=True)
         
@@ -593,21 +594,19 @@ if "client_results" in st.session_state:
             comp_lines = []
             for name, alloc in ports_saved.items():
                 comp_lines.append(f"<b>{name}</b> : {alloc_to_text(alloc)}")
-
             st.markdown("**Compositions :**<br>" + "<br>".join(comp_lines), unsafe_allow_html=True)
-
-            
+ 
         st.subheader("Performance du patrimoine contre les deux portefeuilles Benchmark")
         port_returns = res["backtest"]["returns"]
         nav_df = pd.DataFrame({k: (1+v).cumprod()*100 for k,v in port_returns.items() if v is not None})
         st.line_chart(nav_df)
 
-    with tabs[1]:
+    with tabs_mc:
         st.subheader("Résumé Monte Carlo")
         st.dataframe(res["mc"]["summary"], use_container_width=True)
-        if not res["mc"]["paths"].empty:
+        if "paths" in res["mc"] and not res["mc"]["paths"].empty:
             st.subheader("Trajectoires simulées (échantillon)")
-            st.line_chart(res["mc"]["paths"].iloc[:, :50])  # 50 chemins pour lisibilité
+            st.line_chart(res["mc"]["paths"].iloc[:, :50])
 
 # --- Zone export (sera branchée sur vos générateurs PDF/DOCX) ----------
 st.divider()
