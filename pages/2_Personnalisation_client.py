@@ -264,13 +264,21 @@ with c2:
         help="(Optionnel) Versements annuels supplémentaires. (Non utilisés pour l’instant dans le calcul.)"
     )
 with c3:
-    appetence = st.slider(
-        "Appétence au risque", 1, 10, 5,
-        help="1 = très prudent (faible risque) ; 10 = très dynamique (risque plus élevé)."
+    objectif = st.radio(
+        "Objectif principal",
+        ["Tolérance drawdown max (%)", "Rendement annuel attendu (%)"],
+        index=0,
+        help="Choisis le critère prioritaire pour vérifier la cohérence des résultats."
     )
     dd_tol = st.slider(
         "Tolérance drawdown max (%)", 5, 80, 30,
-        help="Borne indicative sur la perte max tolérée (pas encore utilisée pour contraindre le portefeuille)."
+        help="Perte max tolérée, utilisée si l'objectif est la tolérance au drawdown.",
+        disabled = (objectif != "Tolérance drawdown max (%)")
+    )
+    expected_return_pct = st.number_input(
+        "Rendement annuel attendu (%)", min_value=-50.0, value=6.0, step=0.5, format="%.2f",
+        help="Objectif de performance annualisée (CAGR), utilisée si l'objectif est le rendement attendu.",
+        disabled = (objectif != "Rendement annuel attendu (%)")
     )
 
 st.divider()
