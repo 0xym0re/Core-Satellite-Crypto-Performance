@@ -522,7 +522,7 @@ if "client_results" in st.session_state:
             comp_all = pd.DataFrame(data_rows)
             # Option : trier par poids perso desc si présent
             if "Personnalisé" in comp_all.columns:
-            c    omp_all = comp_all.sort_values(by="Personnalisé", ascending=False)
+                comp_all = comp_all.sort_values(by="Personnalisé", ascending=False)
             st.dataframe(comp_all, use_container_width=True)
             
         st.subheader("Performance du patrimoine contre les deux portefeuilles Benchmark")
