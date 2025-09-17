@@ -323,20 +323,6 @@ else:
 
 custom_alloc = {t: w for t, w in custom_alloc_pairs if w > 0}
 
-# Bouton de pré-remplissage par appétence (hors form -> réactif)
-def suggested_weights_from_risk(score: int):
-    gold = 0.05
-    eq = float(np.interp(score, [1, 10], [0.20, 0.85]))
-    bond = 1.0 - gold - eq
-    return {"^GSPC": eq, "AGGG.L": max(0.0, bond), "GC=F": gold}
-
-if st.button("🎚️ Pré-remplir selon l’appétence"):
-    sw = suggested_weights_from_risk(appetence)
-    for i, (ticker, w) in enumerate(sw.items()):
-        st.session_state[f"cust_asset_{i}"] = asset_names_map.get(ticker, ticker)
-        st.session_state[f"cust_w_{i}"] = round(w*100, 1)
-    st.rerun()
-
 st.divider()
 st.subheader("Paramètres d’estimation")
 
@@ -394,7 +380,6 @@ profile = {
     "montant_investi": investissement,
     "horizon_annees": horizon_annees,
     "apports_annuels": apports_annuels,
-    "appetence": appetence,
     "dd_tolerance_pct": dd_tol,
     "var_conf": float(var_conf),
     "freq": freq,              # fréquence pour MC & métriques
@@ -402,6 +387,8 @@ profile = {
     "rebal_mode": rebal_mode,
     "created": str(date.today()),
     "custom_alloc": custom_alloc,  # <-- l’allocation construite via l’UI
+    "objective": ("MDD" if objectif.startswith("Tolérance") else "TARGET_RETURN"),
+    "expected_return_annual": float(expected_return_pct)/100.0,
 
     # Monte Carlo (depuis l’UI)
     "mc_model": ("GBM" if mc_model.startswith("GBM") else "BOOT"),
@@ -449,73 +436,35 @@ if run_clicked:
         )
     metrics_df = pd.DataFrame(metrics)
 
-    # Monte Carlo piloté par l’appétence (réutilise les retours backtest)
-    def risk_controls(score):
-        vol_scale = float(np.interp(score, [1, 10], [0.6, 1.6]))
-        df_tail   = int(round(np.interp(score, [1, 10], [12, 4])))
-        mu_shift  = float(np.interp(score, [1, 10], [-0.01, 0.01]))
-        return vol_scale, df_tail, mu_shift
-
-    r_hist = port_returns["Personnalisé"].dropna()
-    if len(r_hist) < 10:
-        mc = {"paths": pd.DataFrame(), "summary": pd.DataFrame(), "metrics": {"note": "pas assez d'historique"}}
-    else:
-        mu = r_hist.mean() * dpy
-        vol = r_hist.std() * np.sqrt(dpy)
-        vol_scale, df_tail, mu_shift = risk_controls(appetence)
-
-        horizon_steps = int(horizon_annees * (252 if profile["freq"]=="Daily" else 52))
-        steps_per_year = 252 if profile["freq"]=="Daily" else 52
-        step_mu  = (1+mu+mu_shift)**(1/steps_per_year) - 1
-        step_vol = (vol * vol_scale) / np.sqrt(steps_per_year)
-
-        np.random.seed(profile["seed"])
-        if profile["mc_model"] == "GBM":
-            shocks = np.random.normal(loc=0.0, scale=step_vol, size=(horizon_steps, profile["mc_paths"]))
-        else:
-            # block bootstrap des rendements historiques (à la fréquence choisie)
-            series = r_hist.values
-            B = max(5, int(profile["mc_block"]))
-            shocks = np.zeros((horizon_steps, profile["mc_paths"]))
-            for j in range(profile["mc_paths"]):
-                out = []
-                while len(out) < horizon_steps:
-                    s0 = np.random.randint(0, max(1, len(series)-B))
-                    out.extend(series[s0:s0+B])
-                shocks[:, j] = np.array(out[:horizon_steps]) - r_hist.mean()  # centre sur 0
-
-            # recale la vol désirée
-            std_now = shocks.std()
-            if std_now > 1e-12:
-                shocks *= (step_vol / std_now)
-
-        step_r = step_mu + shocks
-        nav = np.cumprod(1 + step_r, axis=0)
-        nav = pd.DataFrame(nav)
-        nav.iloc[0, :] = 1.0
-
-        final_r = nav.iloc[-1, :] - 1.0
-        alpha = profile["var_conf"]
-        capital0 = investissement
-        q = np.quantile(final_r, 1-alpha)
-        var_cash = float(capital0 * -q)
-        cvar_cash = float(capital0 * -final_r[final_r <= q].mean())
-
-        mc = {
-            "paths": nav,
-            "summary": pd.DataFrame({
-                "P5": [np.quantile(final_r, 0.05)],
-                "P50": [np.quantile(final_r, 0.50)],
-                "P95": [np.quantile(final_r, 0.95)],
-                f"VaR {int(alpha*100)}% ($)": [var_cash],
-                f"CVaR {int(alpha*100)}% ($)": [cvar_cash],
-            }),
-            "metrics": {"mu_ann_hist": float(mu), "vol_ann_hist": float(vol),
-                        "vol_scale": vol_scale, "df": df_tail, "mu_shift": mu_shift,
-                        "model": profile["mc_model"], "paths": int(profile["mc_paths"])}
-        }
+    # Monte Carlo (calibré sur l'historique du portefeuille personnalisé)
+    mc = run_monte_carlo(profile)
 
     st.session_state["client_results"] = {"backtest": {"returns": port_returns, "metrics_df": metrics_df}, "mc": mc}
+
+    # --- Contrôle de cohérence vs objectif choisi ---------------------------
+r_person = port_returns["Personnalisé"].dropna()
+if len(r_person) > 0:
+    # CAGR annuel au pas sélectionné
+    cagr = (1.0 + r_person).prod() ** (dpy / len(r_person)) - 1.0
+    # Max drawdown historique
+    _, max_dd = drawdown_stats(r_person)  # max_dd négatif (ex: -0.32 => -32%)
+    max_dd_pct = abs(float(max_dd)) * 100.0
+
+    if profile["objective"] == "MDD":
+        ok = (max_dd_pct <= float(profile["dd_tolerance_pct"]))
+        msg = f"Max drawdown observé : {max_dd_pct:.1f}%  |  Tolérance : {profile['dd_tolerance_pct']:.0f}%."
+    else:
+        target = float(profile["expected_return_annual"]) * 100.0
+        ok = (cagr * 100.0 >= target)
+        msg = f"CAGR observé : {cagr*100.0:.1f}%  |  Objectif : {target:.1f}%."
+
+    if ok:
+        st.success("✅ Cohérent — " + msg)
+    else:
+        st.error("❌ Non cohérent — " + msg)
+else:
+    st.warning("Pas assez d’historique pour effectuer le contrôle de cohérence.")
+
     st.success("Backtest + Monte Carlo terminés.")
 
 # --- Affichage minimal des emplacements (placeholder) ------------------
