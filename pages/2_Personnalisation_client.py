@@ -551,7 +551,6 @@ if run_clicked:
     }
 
     # --- Contrôle de cohérence vs objectif choisi ---------------------------
-    # --- Contrôle de cohérence vs objectif choisi ---------------------------
     r_check = port_returns["Patrimoine + Crypto (overlay)"].dropna()
     if len(r_check) > 0:
         cagr = (1.0 + r_check).prod() ** (dpy / len(r_check)) - 1.0
@@ -574,19 +573,20 @@ if run_clicked:
 if "client_results" in st.session_state:
     res = st.session_state["client_results"]
 
+    # ✅ Unpack propre des onglets
     tab_backtest, tab_mc = st.tabs(["Backtest", "Monte Carlo"])
 
     with tab_backtest:
         st.subheader("Métriques (4 portefeuilles)")
         st.dataframe(res["backtest"]["metrics_df"], use_container_width=True)
-        
-            # --- Compositions (présentation façon page 1) ---
+
+        # --- Compositions (présentation façon page 1) ---  <- aligné sur 8 espaces (même niveau que st.dataframe)
         ports_saved = res["backtest"].get("ports", {})
         if ports_saved:
             def alloc_to_text(alloc):
                 items = []
                 for t, w in sorted(alloc.items(), key=lambda x: -x[1]):
-                    if w <= 0: 
+                    if w <= 0:
                         continue
                     items.append(f"{asset_names_map.get(t, t)} {w*100:.1f}%")
                 return ", ".join(items)
@@ -595,13 +595,14 @@ if "client_results" in st.session_state:
             for name, alloc in ports_saved.items():
                 comp_lines.append(f"<b>{name}</b> : {alloc_to_text(alloc)}")
             st.markdown("**Compositions :**<br>" + "<br>".join(comp_lines), unsafe_allow_html=True)
- 
+
         st.subheader("Performance du patrimoine contre les deux portefeuilles Benchmark")
         port_returns = res["backtest"]["returns"]
-        nav_df = pd.DataFrame({k: (1+v).cumprod()*100 for k,v in port_returns.items() if v is not None})
+        nav_df = pd.DataFrame({k: (1+v).cumprod()*100 for k, v in port_returns.items() if v is not None})
         st.line_chart(nav_df)
 
-    with tabs_mc:
+    # ❌ with tabs_mc:   ->   ✅ with tab_mc:
+    with tab_mc:
         st.subheader("Résumé Monte Carlo")
         st.dataframe(res["mc"]["summary"], use_container_width=True)
         if "paths" in res["mc"] and not res["mc"]["paths"].empty:
