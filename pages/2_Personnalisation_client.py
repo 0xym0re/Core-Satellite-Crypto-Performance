@@ -242,7 +242,7 @@ st.markdown(
     "La page prépare les entrées pour un **backtest** et/ou une **simulation Monte Carlo**."
 )
 
-st.subheader("1) Profil & Contraintes")
+st.subheader("Profil & Contraintes")
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -271,21 +271,6 @@ with c3:
     dd_tol = st.slider(
         "Tolérance drawdown max (%)", 5, 80, 30,
         help="Borne indicative sur la perte max tolérée (pas encore utilisée pour contraindre le portefeuille)."
-    )
-
-st.divider()
-st.subheader("2) Paramètres d’estimation")
-
-c4, c5 = st.columns(2)
-with c4:
-    var_conf = st.slider(
-        "Confiance VaR/CVaR", 0.80, 0.995, 0.95, 0.005,
-        help="Niveau de confiance pour la VaR/CVaR. 0.95 = perte dépassée dans 5% des cas."
-    )
-with c5:
-    freq = st.selectbox(
-        "Fréquence de calcul", ["Daily", "Weekly"], index=0,
-        help="Fréquence des rendements/échantillonnage : 'Daily' ≈ 252 j/an ; 'Weekly' ≈ 52 sem/an."
     )
 
 st.divider()
@@ -343,6 +328,21 @@ if st.button("🎚️ Pré-remplir selon l’appétence"):
         st.session_state[f"cust_asset_{i}"] = asset_names_map.get(ticker, ticker)
         st.session_state[f"cust_w_{i}"] = round(w*100, 1)
     st.rerun()
+
+st.divider()
+st.subheader("Paramètres d’estimation")
+
+c4, c5 = st.columns(2)
+with c4:
+    var_conf = st.slider(
+        "Confiance VaR/CVaR", 0.80, 0.995, 0.95, 0.005,
+        help="Niveau de confiance pour la VaR/CVaR. 0.95 = perte dépassée dans 5% des cas."
+    )
+with c5:
+    freq = st.selectbox(
+        "Fréquence de calcul", ["Daily", "Weekly"], index=0,
+        help="Fréquence des rendements/échantillonnage : 'Daily' ≈ 252 j/an ; 'Weekly' ≈ 52 sem/an."
+    )
 
 st.divider()
 st.subheader("Backtest & Monte Carlo — réglages")
