@@ -563,7 +563,10 @@ if run_clicked:
             target = float(profile["expected_return_annual"]) * 100.0
             ok = (cagr * 100.0 >= target)
             msg = f"CAGR observé : {cagr*100.0:.1f}%  |  Objectif : {target:.1f}%."
-        st.success("✅ Cohérent — " + msg) if ok else st.error("❌ Non cohérent — " + msg)
+        if ok:
+            st.success("✅ Cohérent — " + msg)
+        else:
+            st.error("❌ Non cohérent — " + msg)
     else:
         st.warning("Pas assez d’historique pour effectuer le contrôle de cohérence.")
 
