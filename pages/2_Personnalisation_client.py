@@ -585,6 +585,17 @@ if "client_results" in st.session_state:
 
     tab_backtest, tab_mc = st.tabs(["Backtest", "Monte Carlo"])
 
+    def alloc_to_df(alloc: dict, name_map: dict) -> pd.DataFrame:
+        rows = []
+        for t, w in sorted(alloc.items(), key=lambda x: -x[1]):
+            if w > 0:
+                rows.append({
+                    "Actif": name_map.get(t, t),
+                    "Ticker": t,
+                    "Poids (%)": round(w*100, 1),
+                })
+        return pd.DataFrame(rows)
+    
     with tab_backtest:
         st.subheader("Métriques (4 portefeuilles)")
         metrics_table = res["backtest"]["metrics_df"].copy()
@@ -593,21 +604,13 @@ if "client_results" in st.session_state:
         st.dataframe(metrics_table, use_container_width=True, hide_index=True)
 
 
+        st.subheader("Compositions")
         ports_saved = res["backtest"].get("ports", {})
-        if ports_saved:
-            def alloc_to_text(alloc):
-                items = []
-                for t, w in sorted(alloc.items(), key=lambda x: -x[1]):
-                    if w <= 0:
-                        continue
-                    items.append(f"{asset_names_map.get(t, t)} {w*100:.1f}%")
-                return ", ".join(items)
-
-            comp_lines = []
-            for name, alloc in ports_saved.items():
-                comp_lines.append(f"<b>{name}</b> : {alloc_to_text(alloc)}")
-            st.markdown("**Compositions :**<br>" + "<br>".join(comp_lines), unsafe_allow_html=True)
-
+        for name, alloc in ports_saved.items():
+            st.markdown(f"**{name}**")
+            df_comp = alloc_to_df(alloc, asset_names_map)
+            st.dataframe(df_comp, use_container_width=True, hide_index=True)
+        
         st.subheader("Performance du patrimoine contre les deux portefeuilles Benchmark")
         port_returns = res["backtest"]["returns"]
         nav_df = pd.DataFrame({k: (1 + v).cumprod() * 100 for k, v in port_returns.items() if v is not None})
