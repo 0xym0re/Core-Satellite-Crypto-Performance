@@ -549,7 +549,10 @@ if run_clicked:
         mdd_p95 = mc_metrics.get("mdd_p95_pct", np.nan)
         ok = (not np.isnan(mdd_p95)) and (mdd_p95 <= float(profile["dd_tolerance_pct"]))
         msg = f"MDD P95 simulé : {mdd_p95:.1f}%  |  Tolérance : {profile['dd_tolerance_pct']:.0f}%."
-        st.success("✅ Cohérent (Monte Carlo) — " + msg) if ok else st.error("❌ Non cohérent (Monte Carlo) — " + msg)
+        if ok:
+            st.success("✅ Cohérent (Monte Carlo) — " + msg)
+        else:
+            st.error("❌ Non cohérent (Monte Carlo) — " + msg)    
     else:
         cagr_median = mc_metrics.get("cagr_median_pct", np.nan)
         target = float(profile["expected_return_annual"]) * 100.0
@@ -584,7 +587,11 @@ if "client_results" in st.session_state:
 
     with tab_backtest:
         st.subheader("Métriques (4 portefeuilles)")
-        st.dataframe(res["backtest"]["metrics_df"], use_container_width=True, hide_index=True)
+        metrics_table = res["backtest"]["metrics_df"].copy()
+        metrics_table.index.name = "Metric"
+        metrics_table = metrics_table.reset_index()  # remet l’index en vraie colonne
+        st.dataframe(metrics_table, use_container_width=True, hide_index=True)
+
 
         ports_saved = res["backtest"].get("ports", {})
         if ports_saved:
