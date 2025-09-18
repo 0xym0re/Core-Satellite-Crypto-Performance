@@ -6,7 +6,6 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import plotly.graph_objects as go
-import plotly.express as px
 
 from scipy.stats import norm
 from datetime import date
@@ -294,7 +293,7 @@ with c1:
     )
     investissement = st.number_input(
         "Montant investi (USD)", min_value=0.0, value=100_000.0, step=1_000.0, format="%.2f",
-        help="Capital de départ utilisé pour le backtest et la simulation Monte Carlo (pour VaR/CVaR en $)."
+        help="Capital utilisé pour le backtest et la simulation Monte Carlo (pour VaR/CVaR en $)."
     )
 with c2:
     horizon_backtest_annees = st.number_input(
@@ -307,7 +306,7 @@ with c2:
     )
     apports_annuels = st.number_input(
         "Versements complémentaires (USD)", min_value=0.0, value=0.0, step=1_000.0, format="%.2f",
-        help="(Optionnel) Versements annuels supplémentaires. (Non utilisés pour l’instant dans le calcul.)"
+        help="(Optionnel) Versements annuels supplémentaires (non utilisés pour l’instant)."
     )
 with c3:
     objectif = st.radio(
@@ -560,6 +559,23 @@ if run_clicked:
 
     st.success("Backtest + Monte Carlo terminés.")
 
+# --- Compat & Reset ----------------------------------------------------
+# Bouton reset si besoin
+if st.button("🔄 Réinitialiser les résultats"):
+    for k in ["client_results", "client_profile"]:
+        st.session_state.pop(k, None)
+    st.rerun()
+
+# Shim de migration: ancien 'summary' -> 'summary_usd'
+if "client_results" in st.session_state:
+    mc_old = st.session_state["client_results"].get("mc", {})
+    if isinstance(mc_old, dict) and "summary_usd" not in mc_old:
+        if "summary" in mc_old:
+            st.session_state["client_results"]["mc"]["summary_usd"] = mc_old["summary"]
+        else:
+            st.session_state["client_results"]["mc"]["summary_usd"] = pd.DataFrame()
+        st.session_state["client_results"]["mc"].setdefault("summary_pct", pd.DataFrame())
+
 # --- Affichage ---------------------------------------------------------
 if "client_results" in st.session_state:
     res = st.session_state["client_results"]
@@ -592,25 +608,25 @@ if "client_results" in st.session_state:
 
     with tab_mc:
         st.subheader("Résumé Monte Carlo — Valeurs en $")
-        st.dataframe(res["mc"]["summary_usd"], use_container_width=True, hide_index=True)
+        st.dataframe(res["mc"].get("summary_usd", pd.DataFrame()), use_container_width=True, hide_index=True)
 
         st.subheader("Résumé Monte Carlo — Valeurs en %")
-        st.dataframe(res["mc"]["summary_pct"], use_container_width=True, hide_index=True)
+        st.dataframe(res["mc"].get("summary_pct", pd.DataFrame()), use_container_width=True, hide_index=True)
 
-        # Trajectoires simulées (Plotly, lignes colorées)
+        # Trajectoires simulées (Plotly, lignes colorées sans légende par chemin)
         if "paths" in res["mc"] and not res["mc"]["paths"].empty:
             paths = res["mc"]["paths"]
             n_show = min(50, paths.shape[1])  # échantillon
             fig = go.Figure()
+            x_vals = np.arange(paths.shape[0])
             for j in range(n_show):
                 fig.add_trace(
                     go.Scatter(
-                        x=np.arange(paths.shape[0]),
+                        x=x_vals,
                         y=paths.iloc[:, j],
                         mode="lines",
                         line=dict(width=1),
-                        name=f"Chemin {j+1}",
-                        showlegend=False  # légende par chemin inutile
+                        showlegend=False
                     )
                 )
             title = f"Trajectoires simulées — N={res['mc']['metrics']['n_paths']}, horizon={int(profile['horizon_mc_annees'])} an(s)"
@@ -627,7 +643,7 @@ if "client_results" in st.session_state:
             # Bande interquartile
             fig_fan.add_trace(go.Scatter(x=fan["t"], y=fan["P25"], mode="lines", line=dict(width=0), name="P25", showlegend=False))
             fig_fan.add_trace(go.Scatter(x=fan["t"], y=fan["P75"], mode="lines", fill="tonexty", line=dict(width=0), name="P75", fillcolor="rgba(100,100,200,0.2)", showlegend=False))
-            # Courbes
+            # Courbes principales
             for p, width in [("P5", 1), ("P50", 2), ("P95", 1)]:
                 fig_fan.add_trace(go.Scatter(x=fan["t"], y=fan[p], mode="lines", name=p, line=dict(width=width)))
             fig_fan.update_layout(height=380, title="Plage de scénarios (P5–P95) avec bande interquartile", xaxis_title="Pas de temps", yaxis_title="Capital ($)")
