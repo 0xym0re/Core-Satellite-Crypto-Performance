@@ -558,8 +558,10 @@ if run_clicked:
         target = float(profile["expected_return_annual"]) * 100.0
         ok = (not np.isnan(cagr_median)) and (cagr_median >= target)
         msg = f"CAGR médiane simulée : {cagr_median:.1f}%  |  Objectif : {target:.1f}%."
-        st.success("✅ Cohérent (Monte Carlo) — " + msg) if ok else st.error("❌ Non cohérent (Monte Carlo) — " + msg)
-
+        if ok:
+            st.success("✅ Cohérent (Monte Carlo) — " + msg)
+        else:
+            st.error("❌ Non cohérent (Monte Carlo) — " + msg) 
     st.success("Backtest + Monte Carlo terminés.")
 
 # --- Compat & Reset ----------------------------------------------------
