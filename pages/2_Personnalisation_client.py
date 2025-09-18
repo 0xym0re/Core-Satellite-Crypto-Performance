@@ -407,7 +407,7 @@ else:
 # Bouton RUN (hors form)
 run_clicked = st.button("🚀 Lancer l’analyse personnalisée", use_container_width=True)
     
-    # --- Construction du profil (persisté en session) ----------------------
+# --- Construction du profil (persisté en session) ----------------------
 profile = {
     "patrimoine_total": patrimoine,
     "montant_investi": investissement,
