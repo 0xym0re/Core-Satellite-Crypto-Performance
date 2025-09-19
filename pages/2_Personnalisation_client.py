@@ -171,22 +171,22 @@ def run_monte_carlo(profile: dict) -> dict:
 
         T = int(profile["horizon_mc_annees"] * (252 if profile["freq"] == "Daily" else 52))
         N = int(profile["mc_paths"])
-        np.random.seed(profile["seed"])
+        rng = np.random.default_rng(profile.get("profile_seed", None))
 
         # Simulations de rendements
         if profile["mc_model"] == "GBM":
-            paths_ret = np.random.normal(loc=mu_d, scale=sig_d, size=(T, N))
+            paths_ret = rng.normal(loc=mu_d, scale=sig_d, size=(T, N))
         else:
             series = r.values
             if len(series) < 20:
-                paths_ret = np.random.normal(loc=mu_d, scale=sig_d, size=(T, N))
+                paths_ret = rng.normal(loc=mu_d, scale=sig_d, size=(T, N))
             else:
                 B = int(profile["mc_block"])
                 paths_ret = np.zeros((T, N))
                 for j in range(N):
                     out = []
                     while len(out) < T:
-                        start = np.random.randint(0, max(1, len(series) - B))
+                        start = rng.randint(0, max(1, len(series) - B))
                         blk = series[start:start + B]
                         out.extend(blk)
                     paths_ret[:, j] = np.array(out[:T])
@@ -423,7 +423,9 @@ mc_paths = st.number_input(
     "N (nombre de chemins)", 100, 20000, 2000, 100,
     help="2 000–10 000 = bon compromis précision/temps."
 )
-seed = st.number_input("Seed (graine aléatoire)", 0, 10**6, 42, 1, help="Pour reproduire les résultats.")
+use_fixed_seed = st.checkbox("Seed fixe (reproductible)", value=True)
+seed = st.number_input("Seed", 0, 10**9, 42, 1, disabled=not use_fixed_seed)
+
 if mc_model == "Block bootstrap":
     mc_block = st.number_input("Taille de bloc (jours/semaines)", 5, 60, 20, 1)
 else:
@@ -450,7 +452,7 @@ profile = {
     "mc_model": ("GBM" if mc_model.startswith("GBM") else "BOOT"),
     "mc_paths": int(mc_paths),
     "mc_block": int(mc_block),
-    "seed": int(seed),
+    "seed": int(seed) if use_fixed_seed else None,
 }
 st.session_state["client_profile"] = profile
 
