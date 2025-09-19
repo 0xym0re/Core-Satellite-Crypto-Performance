@@ -14,6 +14,9 @@ from pages.shared_quant import (
     download_prices, portfolio_daily_returns, compute_metrics_from_returns
 )
 
+if "fred_info_shown" not in st.session_state:
+    st.session_state["fred_info_shown"] = False
+    
 # --- Charte ------------------------------------------------------------
 PRIMARY = "#4E26DF"
 SECONDARY = "#7CEF17"
@@ -144,7 +147,9 @@ def run_backtest(profile: dict) -> dict:
             rf_annual = get_fed_funds_annualized(start_date, end_date)
             if rf_annual is None:
                 rf_annual = float(profile.get("rf_manual", 0.0))
-                st.info("Impossible de récupérer DFF (FRED). Utilisation du taux manuel.")
+                if not st.session_state["fred_info_shown"]:
+                    st.info("Impossible de récupérer DFF (FRED). Utilisation du taux manuel.")
+                    st.session_state["fred_info_shown"] = True
         else:
             rf_annual = float(profile.get("rf_manual", 0.0))
 
@@ -568,7 +573,9 @@ if run_clicked:
         rf_annual_df = get_fed_funds_annualized(start_date, end_date)
         if rf_annual_df is None:
             rf_annual_df = float(profile.get("rf_manual", 0.0))
-            st.info("Impossible de récupérer DFF (FRED). Utilisation du taux manuel.")
+            if not st.session_state["fred_info_shown"]:
+                st.info("Impossible de récupérer DFF (FRED). Utilisation du taux manuel.")
+                st.session_state["fred_info_shown"] = True
     else:
         rf_annual_df = float(profile.get("rf_manual", 0.0))
 
