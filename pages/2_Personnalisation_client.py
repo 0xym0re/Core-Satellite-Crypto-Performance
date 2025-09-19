@@ -581,7 +581,7 @@ if run_clicked:
     metrics = {}
     for name, r in port_returns.items():
         metrics[name] = compute_metrics_from_returns(
-            r, dpy=dpy, rf_annual=rf_annual,
+            r, dpy=dpy, rf_annual=0.0,
             want_sortino=True, want_calmar=True, want_var=True, want_cvar=True, var_alpha=profile["var_conf"]
         )
     metrics_df = pd.DataFrame(metrics)
