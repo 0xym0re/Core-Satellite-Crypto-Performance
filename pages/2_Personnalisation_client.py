@@ -155,20 +155,6 @@ def run_backtest(profile: dict) -> dict:
 
         metrics = compute_metrics_from_returns(r, dpy=dpy, rf_annual=rf_annual)
 
-        # VaR/CVaR backtest (horizon MC)
-        T = int(profile["horizon_mc_annees"] * (252 if profile["freq"] == "Daily" else 52))
-        mu_d, sig_d = r.mean(), r.std()
-        if not np.isnan(mu_d) and not np.isnan(sig_d) and T > 0:
-            alpha = profile["var_conf"]
-            z = norm.ppf(1 - alpha)
-            ret_h = mu_d * T + z * sig_d * np.sqrt(T)
-            var_pct = -ret_h
-            cvar_pct = -(mu_d * T - sig_d * np.sqrt(T) * norm.pdf(z) / (1 - alpha))
-            metrics.update({
-                f"VaR {int(alpha*100)}% ($)": round(profile["montant_investi"] * max(0.0, var_pct), 2),
-                f"CVaR {int(alpha*100)}% ($)": round(profile["montant_investi"] * max(0.0, cvar_pct), 2)
-            })
-
         return {"returns": r, "nav": nav, "metrics": metrics}
     except Exception as e:
         st.warning(f"Backtest: {e}")
@@ -196,7 +182,7 @@ def run_monte_carlo(profile: dict) -> dict:
 
         T = int(profile["horizon_mc_annees"] * (252 if profile["freq"] == "Daily" else 52))
         N = int(profile["mc_paths"])
-        rng = np.random.default_rng(profile.get("profile_seed", None))
+        rng = np.random.default_rng(profile.get("seed", None))
 
         # Simulations de rendements
         if profile["mc_model"] == "GBM":
@@ -532,7 +518,7 @@ if run_clicked:
     all_tickers = set(custom_alloc.keys()) | set(crypto_alloc.keys()) | set(bench_60_40.keys()) | set(bench_60_40_gold.keys())
     df = download_prices(sorted(all_tickers), start_date, end_date)
 
-    if profile["freq"] == "Daily":
+    if profile["freq_backtest"] == "Daily":
         dpy = 252
         dfA = df.resample("B").last().ffill()
     else:
@@ -577,13 +563,22 @@ if run_clicked:
         "60/40": r_60_40,
         "60/40 + 5% Or": r_60_40_gold
     }
+    # Taux sans risque pour les métriques (même logique que run_backtest)
+    if profile.get("rf_mode") == "Fed funds moyen (FRED DFF)":
+        rf_annual_df = get_fed_funds_annualized(start_date, end_date)
+        if rf_annual_df is None:
+            rf_annual_df = float(profile.get("rf_manual", 0.0))
+            st.info("Impossible de récupérer DFF (FRED). Utilisation du taux manuel.")
+    else:
+        rf_annual_df = float(profile.get("rf_manual", 0.0))
 
     metrics = {}
     for name, r in port_returns.items():
         metrics[name] = compute_metrics_from_returns(
-            r, dpy=dpy, rf_annual=0.0,
+            r, dpy=dpy, rf_annual=rf_annual_df,
             want_sortino=True, want_calmar=True, want_var=True, want_cvar=True, var_alpha=profile["var_conf"]
         )
+
     metrics_df = pd.DataFrame(metrics)
 
     tot_cap = float(patrimoine) + float(investissement)
