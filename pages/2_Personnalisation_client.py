@@ -20,6 +20,17 @@ SECONDARY = "#7CEF17"
 
 # --- Helpers -----------------------------------------------------------
 
+# -- Risk-free helper (FRED Fed Funds) ---------------------------------
+def get_fed_funds_annualized(start, end):
+    """Retourne le Fed Funds effectif moyen (annualisé en décimal) sur [start, end].
+       Fallback: renvoie None si pandas_datareader/FRED indisponible."""
+    try:
+        from pandas_datareader import data as pdr
+        s = pdr.DataReader("DFF", "fred", start, end).dropna()
+        return float(s.mean() / 100.0)  # ex: 5.25% -> 0.0525
+    except Exception:
+        return None
+        
 def download_prices_simple(tickers, start, end):
     if isinstance(tickers, str):
         tickers = [tickers]
@@ -128,12 +139,21 @@ def run_backtest(profile: dict) -> dict:
         end_date = pd.Timestamp.today().normalize() - pd.Timedelta(days=1)
         start_date = end_date - pd.Timedelta(days=window_days)
 
+        # Choix du taux sans risque (annualisé)
+        if profile.get("rf_mode") == "Fed funds moyen (FRED DFF)":
+            rf_annual = get_fed_funds_annualized(start_date, end_date)
+            if rf_annual is None:
+                rf_annual = float(profile.get("rf_manual", 0.0))
+                st.info("Impossible de récupérer DFF (FRED). Utilisation du taux manuel.")
+        else:
+            rf_annual = float(profile.get("rf_manual", 0.0))
+
         raw = download_prices_simple(tickers, start_date, end_date)
         df, dpy = normalize_clock(raw, profile["freq_backtest"])
         r = portfolio_daily_returns(df, alloc, profile["rebal_mode"])
         nav = (1 + r).cumprod() * 100.0
 
-        metrics = compute_metrics_from_returns(r, dpy=dpy, rf_annual=0.0)
+        metrics = compute_metrics_from_returns(r, dpy=dpy, rf_annual=rf_annual)
 
         # VaR/CVaR backtest (horizon MC)
         T = int(profile["horizon_mc_annees"] * (252 if profile["freq"] == "Daily" else 52))
@@ -164,6 +184,11 @@ def run_monte_carlo(profile: dict) -> dict:
         if r.empty:
             return {"paths": pd.DataFrame(), "summary_usd": pd.DataFrame(), "summary_pct": pd.DataFrame(), "metrics": {}}
 
+        # --- Calibrage sur les log-rendements (GBM en log) ---
+        g = np.log1p(r.dropna())
+        mu_g = float(g.mean())
+        sig_g = float(g.std(ddof=1))
+
         mu_d, sig_d = r.mean(), r.std()
 
         # ✅ Capital initial = Patrimoine total + Montant investi
@@ -175,26 +200,48 @@ def run_monte_carlo(profile: dict) -> dict:
 
         # Simulations de rendements
         if profile["mc_model"] == "GBM":
-            paths_ret = rng.normal(loc=mu_d, scale=sig_d, size=(T, N))
+            # GBM en log; innovations au choix (NORMAL par défaut si "gbm_flavor" absent)
+            if profile.get("gbm_flavor", "NORMAL") == "NORMAL":
+                shocks = rng.normal(loc=mu_g, scale=sig_g, size=(T, N))
+            else:
+                # Student-t : variance = nu/(nu-2). On standardise pour avoir var=1 puis on remet l'échelle sig_g
+                from scipy.stats import t as student_t
+                nu = int(profile.get("nu_t", 6))
+                y = student_t.rvs(df=nu, size=(T, N), random_state=rng)  # queues épaisses
+                y = y / np.sqrt(nu / (nu - 2.0))                         # var=1 pour nu>2
+                shocks = mu_g + sig_g * y
+
+            # Intégration des log-returns -> niveau
+            log_levels = np.cumsum(shocks, axis=0)
+            nav_paths = np.empty((T + 1, N), dtype=float)
+            nav_paths[0, :] = capital0
+            nav_paths[1:, :] = capital0 * np.exp(log_levels)
+
         else:
-            series = r.values
+            # --- Block bootstrap des rendements arithmétiques historiques ---
+            series = r.dropna().values
             if len(series) < 20:
-                paths_ret = rng.normal(loc=mu_d, scale=sig_d, size=(T, N))
+                # fallback: repasse en GBM normal sur logs si historique trop court
+                shocks = rng.normal(loc=mu_g, scale=sig_g, size=(T, N))
+                log_levels = np.cumsum(shocks, axis=0)
+                nav_paths = np.empty((T + 1, N), dtype=float)
+                nav_paths[0, :] = capital0
+                nav_paths[1:, :] = capital0 * np.exp(log_levels)
             else:
                 B = int(profile["mc_block"])
-                paths_ret = np.zeros((T, N))
+                nav_paths = np.empty((T + 1, N), dtype=float)
+                nav_paths[0, :] = capital0
+                # ✅ correctif de bord : autoriser le dernier bloc possible
+                max_start = max(1, len(series) - B + 1)
                 for j in range(N):
                     out = []
                     while len(out) < T:
-                        start = rng.randint(0, max(1, len(series) - B))
+                        start = rng.integers(0, max_start)
                         blk = series[start:start + B]
                         out.extend(blk)
-                    paths_ret[:, j] = np.array(out[:T])
-
-        # NAV en $
-        nav_paths = np.empty((T + 1, N), dtype=float)
-        nav_paths[0, :] = capital0
-        nav_paths[1:, :] = capital0 * np.cumprod(1 + paths_ret, axis=0)
+                    # évite -100% qui annule la trajectoire
+                    r_path = np.maximum(-0.999, np.array(out[:T], dtype=float))
+                    nav_paths[1:, j] = capital0 * np.cumprod(1.0 + r_path)
 
         # Fan chart percentiles
         prc = [5, 25, 50, 75, 95]
@@ -406,7 +453,16 @@ with c5:
         "Fréquence de calcul", ["Daily", "Weekly"], index=0,
         help="'Daily' ≈ 252 j/an ; 'Weekly' ≈ 52 sem/an."
     )
-
+    rf_mode = st.radio(
+        "Taux sans risque (pour Sharpe/Sortino)",
+        ["Manuel", "Fed funds moyen (FRED DFF)"],
+        index=0,
+        help="Utilisé pour calculer Sharpe/Sortino/Calmar sur le backtest."
+    )
+    rf_manual_pct = st.number_input(
+        "Taux sans risque annuel (%)", min_value=-5.0, value=0.0, step=0.25, format="%.2f",
+        disabled=(rf_mode != "Manuel")
+    )
 st.divider()
 st.subheader("Backtest & Monte Carlo — réglages")
 
@@ -416,9 +472,14 @@ rebal_mode = st.selectbox(
 )
 
 mc_model = st.selectbox(
-    "Modèle Monte Carlo", ["GBM (normal i.i.d.)", "Block bootstrap"], index=0,
-    help="GBM: N(mu, sigma) i.i.d. ; Bootstrap: blocs historiques."
+    "Modèle Monte Carlo", ["GBM (log)", "Block bootstrap"], index=0,
+    help="GBM (log-returns) ou bootstrap non-paramétrique."
 )
+gbm_flavor = st.selectbox(
+    "Innovations pour GBM (log)", ["Normale", "Student-t (queues épaisses)"], index=0
+)
+nu_t = st.slider("Degrés de liberté t-Student", 3, 30, 6, 1,
+                 help="Plus petit = queues plus épaisses.", disabled=(gbm_flavor != "Student-t (queues épaisses)"))
 mc_paths = st.number_input(
     "N (nombre de chemins)", 100, 20000, 2000, 100,
     help="2 000–10 000 = bon compromis précision/temps."
@@ -450,9 +511,13 @@ profile = {
     "objective": ("MDD" if objectif.startswith("Tolérance") else "TARGET_RETURN"),
     "expected_return_annual": float(expected_return_pct) / 100.0,
     "mc_model": ("GBM" if mc_model.startswith("GBM") else "BOOT"),
+    "gbm_flavor": "STUDENT_T" if gbm_flavor.startswith("Student") else "NORMAL",
+    "nu_t": int(nu_t),
     "mc_paths": int(mc_paths),
     "mc_block": int(mc_block),
     "seed": int(seed) if use_fixed_seed else None,
+    "rf_mode": rf_mode,
+    "rf_manual": float(rf_manual_pct) / 100.0,
 }
 st.session_state["client_profile"] = profile
 
@@ -516,7 +581,7 @@ if run_clicked:
     metrics = {}
     for name, r in port_returns.items():
         metrics[name] = compute_metrics_from_returns(
-            r, dpy=dpy, rf_annual=0.0,
+            r, dpy=dpy, rf_annual=rf_annual,
             want_sortino=True, want_calmar=True, want_var=True, want_cvar=True, var_alpha=profile["var_conf"]
         )
     metrics_df = pd.DataFrame(metrics)
