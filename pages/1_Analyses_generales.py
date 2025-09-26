@@ -889,7 +889,7 @@ with st.sidebar:
     company_name = st.text_input("Nom société", "Alphacap Digital Assets")
     logo_file = st.file_uploader("Logo (PNG/JPG)", type=["png","jpg","jpeg"])
     include_pdf = st.checkbox("Générer un rapport PDF à l'export", value=True)
-    source_text = st.text_input("Texte de source/filigrane", "Source : Alphacap Digital Assets")
+    source_text = st.text_input("Texte de source/filigrane", "Alphacap Digital Assets")
     show_watermark = st.checkbox("Afficher la source sur les graphiques", value=True)
 
 # ----------------------------------------------------------------------------------------
