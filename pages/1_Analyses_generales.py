@@ -108,20 +108,6 @@ def add_plotly_watermark(fig: go.Figure, text: str, opacity=0.25, font_size=32):
         font=dict(size=font_size, color="rgba(0,0,0,0.6)"),
         textangle=0, opacity=opacity
     )
-    # Etiquette de source en bas-gauche (persistante même si le fond est chargé)
-    fig.add_annotation(
-        text=text,
-        x=0.0, y=-0.18, xref="paper", yref="paper",
-        showarrow=False,
-        font=dict(size=12, color="#666")
-    )
-    # Ajuster marges bas pour laisser la place au label
-    m = fig.layout.margin
-    l = m.l if m and m.l is not None else 20
-    r = m.r if m and m.r is not None else 20
-    t = m.t if m and m.t is not None else 60
-    b = m.b if m and m.b is not None else 60
-    fig.update_layout(margin=dict(l=l, r=r, t=t, b=max(80, b)))
     return fig
 
 def add_mpl_watermark(ax, text: str, opacity=0.25, fontsize=28):
@@ -131,9 +117,7 @@ def add_mpl_watermark(ax, text: str, opacity=0.25, fontsize=28):
     ax.text(0.5, 0.5, text, transform=ax.transAxes,
             ha='center', va='center', rotation=30,
             fontsize=fontsize, alpha=opacity, color='black')
-    # Etiquette en bas-gauche
-    ax.text(0.0, -0.15, text, transform=ax.transAxes,
-            ha='left', va='top', fontsize=9, color='#666')
+    
 
 
 # ----------------------------------------------------------------------------------------
