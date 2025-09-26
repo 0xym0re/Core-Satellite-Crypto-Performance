@@ -116,8 +116,12 @@ def add_plotly_watermark(fig: go.Figure, text: str, opacity=0.25, font_size=22):
         font=dict(size=12, color="#666")
     )
     # Ajuster marges bas pour laisser la place au label
-    m = fig.layout.margin or dict(l=20, r=20, t=60, b=60)
-    fig.update_layout(margin=dict(l=m.get('l',20), r=m.get('r',20), t=m.get('t',60), b=max(80, m.get('b',60))))
+    m = fig.layout.margin
+    l = m.l if m and m.l is not None else 20
+    r = m.r if m and m.r is not None else 20
+    t = m.t if m and m.t is not None else 60
+    b = m.b if m and m.b is not None else 60
+    fig.update_layout(margin=dict(l=l, r=r, t=t, b=max(80, b)))
     return fig
 
 def add_mpl_watermark(ax, text: str, opacity=0.25, fontsize=28):
@@ -1240,6 +1244,7 @@ if "export_payload" in st.session_state:
                 payload["charts_for_pdf"],  # dict de PNG bytes
                 payload["metrics_df"],
                 composition_lines=payload["comp_lines_plain"]
+                source_text=source_text,
             )
             st.session_state["pdf_bytes"] = pdf_buf.getvalue()
         except Exception as e:
