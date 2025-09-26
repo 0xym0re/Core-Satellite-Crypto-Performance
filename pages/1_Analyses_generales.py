@@ -97,6 +97,41 @@ def _heatmap_cmap():
     except Exception:
         return "viridis"
 
+def add_plotly_watermark(fig: go.Figure, text: str, opacity=0.25, font_size=22):
+    if not text:
+        return fig
+    # Filigrane diagonal discret au centre
+    fig.add_annotation(
+        text=text,
+        x=0.5, y=0.5, xref="paper", yref="paper",
+        showarrow=False,
+        font=dict(size=font_size, color="rgba(0,0,0,0.6)"),
+        textangle=-30, opacity=opacity
+    )
+    # Etiquette de source en bas-gauche (persistante même si le fond est chargé)
+    fig.add_annotation(
+        text=text,
+        x=0.0, y=-0.18, xref="paper", yref="paper",
+        showarrow=False,
+        font=dict(size=12, color="#666")
+    )
+    # Ajuster marges bas pour laisser la place au label
+    m = fig.layout.margin or dict(l=20, r=20, t=60, b=60)
+    fig.update_layout(margin=dict(l=m.get('l',20), r=m.get('r',20), t=m.get('t',60), b=max(80, m.get('b',60))))
+    return fig
+
+def add_mpl_watermark(ax, text: str, opacity=0.25, fontsize=28):
+    if not text:
+        return
+    # Filigrane diagonal au centre
+    ax.text(0.5, 0.5, text, transform=ax.transAxes,
+            ha='center', va='center', rotation=30,
+            fontsize=fontsize, alpha=opacity, color='black')
+    # Etiquette en bas-gauche
+    ax.text(0.0, -0.15, text, transform=ax.transAxes,
+            ha='left', va='top', fontsize=9, color='#666')
+
+
 # ----------------------------------------------------------------------------------------
 
 
@@ -289,6 +324,8 @@ def plot_cumulative_lines(df_prices, names_map, title):
     fig.update_layout(title=title, xaxis_title="", yaxis_title="Base 100",
                       legend=dict(orientation="h", y=-0.2),
                       margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
+    if show_watermark:
+        add_plotly_watermark(fig, source_text)
     return fig
 
 def plot_perf_bars(df_prices, names_map, title):
@@ -300,6 +337,8 @@ def plot_perf_bars(df_prices, names_map, title):
     fig.update_layout(title=title, yaxis_title="Performance", xaxis_title="",
                       uniformtext_minsize=8, uniformtext_mode='hide',
                       margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
+    if show_watermark:
+        add_plotly_watermark(fig, source_text)
     return fig
 
 def plot_heatmap_corr(df_prices, names_map, title):
@@ -310,6 +349,8 @@ def plot_heatmap_corr(df_prices, names_map, title):
     fig = px.imshow(C, text_auto=".2f", aspect="auto",
                     color_continuous_scale=["#4E26DF","#a993fa","#CAE5F5","#F2F2F2","#C3F793","#7CEF17"])
     fig.update_layout(title=title, margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
+    if show_watermark:
+        add_plotly_watermark(fig, source_text)
     return fig
 
 def plot_relative_vs_benchmark(df_all, benchmark_ticker, names_map, title):
@@ -325,6 +366,8 @@ def plot_relative_vs_benchmark(df_all, benchmark_ticker, names_map, title):
     fig.update_layout(title=title, xaxis_title="", yaxis_title="Sur/ss perf vs benchmark (%)",
                       legend=dict(orientation="h", y=-0.2),
                       margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
+    if show_watermark:
+        add_plotly_watermark(fig, source_text)
     return fig
 
 def plot_portfolios_cum(nav_dict, title):
@@ -336,6 +379,8 @@ def plot_portfolios_cum(nav_dict, title):
     fig.update_layout(title=title, xaxis_title="", yaxis_title="Base 100",
         legend=dict(orientation="h", y=-0.2),
         margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
+    if show_watermark:
+        add_plotly_watermark(fig, source_text)
     return fig
 
 def fig_to_png_bytes(fig, scale=2):
@@ -393,6 +438,8 @@ def plot_crypto_sleeve_vs_benchmark(df_all, benchmark_ticker, sleeve_nav, names_
     fig.update_layout(title=title, xaxis_title="", yaxis_title="Sur/ss perf vs benchmark (%)",
                       legend=dict(orientation="h", y=-0.2),
                       margin=dict(l=20, r=20, t=60, b=60), template="plotly_white")
+    if show_watermark:
+        add_plotly_watermark(fig, source_text)
     return fig
 
 # ----------------------------------------------------------------------------------------
@@ -425,6 +472,8 @@ def make_heatmap_png_mpl(df_prices, names_map, title):
     ax.set_title(title, color="#222")
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
     fig.tight_layout()
+    if show_watermark:
+        add_mpl_watermark(ax, source_text)
     return mpl_fig_to_png_bytes(fig)
 
 def make_perf_bars_png_mpl(df_prices, names_map, title):
@@ -439,6 +488,8 @@ def make_perf_bars_png_mpl(df_prices, names_map, title):
     ax.set_title(title, color="#222")
     ax.set_xlabel("Performance (%)")
     fig.tight_layout()
+    if show_watermark:
+        add_mpl_watermark(ax, source_text)
     return mpl_fig_to_png_bytes(fig)
 
 def make_cumulative_lines_png_mpl(df_prices, names_map, title):
@@ -453,6 +504,8 @@ def make_cumulative_lines_png_mpl(df_prices, names_map, title):
     ax.legend(fontsize=8, ncol=3)
     fig.autofmt_xdate()
     fig.tight_layout()
+    if show_watermark:
+        add_mpl_watermark(ax, source_text)
     return mpl_fig_to_png_bytes(fig)
 
 def make_relative_vs_benchmark_png_mpl(df_all, benchmark_ticker, names_map, title):
@@ -472,6 +525,8 @@ def make_relative_vs_benchmark_png_mpl(df_all, benchmark_ticker, names_map, titl
     ax.legend(fontsize=8, ncol=3)
     fig.autofmt_xdate()
     fig.tight_layout()
+    if show_watermark:
+        add_mpl_watermark(ax, source_text)
     return mpl_fig_to_png_bytes(fig)
 
 def make_portfolios_cum_png_mpl(nav_dict, title):
@@ -487,6 +542,8 @@ def make_portfolios_cum_png_mpl(nav_dict, title):
     ax.legend(fontsize=8, ncol=3)
     fig.autofmt_xdate()
     fig.tight_layout()
+    if show_watermark:
+        add_mpl_watermark(ax, source_text)
     return mpl_fig_to_png_bytes(fig)
 
 def make_crypto_sleeve_vs_benchmark_png_mpl(df_all, benchmark_ticker, sleeve_nav, title):
@@ -511,6 +568,8 @@ def make_crypto_sleeve_vs_benchmark_png_mpl(df_all, benchmark_ticker, sleeve_nav
     ax.legend(fontsize=8, ncol=1)
     fig.autofmt_xdate()
     fig.tight_layout()
+    if show_watermark:
+        add_mpl_watermark(ax, source_text)
     return mpl_fig_to_png_bytes(fig)
 
 # ----------------------------------------------------------------------------------------
@@ -529,7 +588,7 @@ def keep_aspect_image(file_like, target_width_cm):
         file_like.seek(0)
         return RLImage(file_like, width=3*cm, height=3*cm)
 
-def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, composition_lines):
+def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, composition_lines, source_text=""):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4,
                             leftMargin=1.5*cm, rightMargin=1.5*cm,
@@ -624,6 +683,8 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
                 png_bytes = fig_to_png_bytes(fig_or_png, scale=2)
             elements.append(Paragraph(name, h2))
             elements.append(RLImage(io.BytesIO(png_bytes), width=17*cm, height=9*cm))
+            if source_text:
+                elements.append(Paragraph(f"<font size=8 color='#666666'>{source_text}</font>", normal))
             elements.append(Spacer(1, 0.3*cm))
         except Exception as e:
             elements.append(Paragraph(f"⚠️ Impossible d’exporter le graphique « {name} » : {str(e)}", normal))
@@ -824,6 +885,8 @@ with st.sidebar:
     company_name = st.text_input("Nom société", "Alphacap Digital Assets")
     logo_file = st.file_uploader("Logo (PNG/JPG)", type=["png","jpg","jpeg"])
     include_pdf = st.checkbox("Générer un rapport PDF à l'export", value=True)
+    source_text = st.text_input("Texte de source/filigrane", "Source : Alphacap Digital Assets")
+    show_watermark = st.checkbox("Afficher la source sur les graphiques", value=True)
 
 # ----------------------------------------------------------------------------------------
 
