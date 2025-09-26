@@ -1243,7 +1243,7 @@ if "export_payload" in st.session_state:
                 logo_io,
                 payload["charts_for_pdf"],  # dict de PNG bytes
                 payload["metrics_df"],
-                composition_lines=payload["comp_lines_plain"]
+                composition_lines=payload["comp_lines_plain"],
                 source_text=source_text,
             )
             st.session_state["pdf_bytes"] = pdf_buf.getvalue()
