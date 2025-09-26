@@ -97,7 +97,7 @@ def _heatmap_cmap():
     except Exception:
         return "viridis"
 
-def add_plotly_watermark(fig: go.Figure, text: str, opacity=0.25, font_size=22):
+def add_plotly_watermark(fig: go.Figure, text: str, opacity=0.25, font_size=32):
     if not text:
         return fig
     # Filigrane diagonal discret au centre
@@ -106,7 +106,7 @@ def add_plotly_watermark(fig: go.Figure, text: str, opacity=0.25, font_size=22):
         x=0.5, y=0.5, xref="paper", yref="paper",
         showarrow=False,
         font=dict(size=font_size, color="rgba(0,0,0,0.6)"),
-        textangle=-30, opacity=opacity
+        textangle=0, opacity=opacity
     )
     # Etiquette de source en bas-gauche (persistante même si le fond est chargé)
     fig.add_annotation(
