@@ -1008,7 +1008,9 @@ def normalize_clock(df, crypto_set, mode):
 # ----------------------------------------------------------------------------------------
 if st.button("🔎 Analyser"):
     try:
-        tickers_graphiques = sorted(set(compare_tickers + [benchmark_ticker]))
+        tickers_graphiques = list(dict.fromkeys(compare_tickers))
+        if benchmark_ticker not in tickers_graphiques:
+            tickers_graphiques.append(benchmark_ticker)
         tickers_portefeuilles = set()
         for alloc in portfolio_allocations.values():
             tickers_portefeuilles.update(alloc.keys())
