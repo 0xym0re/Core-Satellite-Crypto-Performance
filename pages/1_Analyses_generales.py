@@ -19,6 +19,8 @@ import plotly.graph_objects as go
 import sys, subprocess, os, shutil
 import plotly.io as pio
 import matplotlib.pyplot as plt
+import re
+
 from matplotlib.colors import LinearSegmentedColormap
 
 from reportlab.lib.pagesizes import A4
@@ -71,6 +73,21 @@ def _to_bytes(uploaded_file):
         pass
     return uploaded_file.read()
 
+def slugify(name: str) -> str:
+    s = name.lower()
+    s = re.sub(r'[^a-z0-9._-]+', '_', s)   # remplace espaces/accents/symboles
+    s = re.sub(r'_+', '_', s).strip('_')
+    return s[:80]  # limite raisonnable
+
+def plotly_download_config(filename: str, scale: int = 2):
+    return {
+        "displaylogo": False,
+        "toImageButtonOptions": {
+            "format": "png",
+            "filename": slugify(filename),
+            "scale": scale
+        }
+    }
 # ----------------------------------------------------------------------------------------
 # Charte graphique
 # ----------------------------------------------------------------------------------------
@@ -1057,10 +1074,11 @@ if st.button("🔎 Analyser"):
             f"Poche crypto vs benchmark ({asset_names_map.get(benchmark_ticker, benchmark_ticker)}) {label_period}"
         )
 
-        st.plotly_chart(fig_heat, use_container_width=True)
-        st.plotly_chart(fig_perf, use_container_width=True)
-        st.plotly_chart(fig_lines, use_container_width=True)
-        st.plotly_chart(fig_rel, use_container_width=True)
+        st.plotly_chart(fig_heat, use_container_width=True, config=plotly_download_config("correlation_matrix"))
+        st.plotly_chart(fig_perf, use_container_width=True, config=plotly_download_config("performances_assets_histo"))
+        st.plotly_chart(fig_lines, use_container_width=True, config=plotly_download_config("performances_assets_graph"))
+        bench_name = asset_names_map.get(benchmark_ticker, benchmark_ticker)
+        st.plotly_chart(fig_rel, use_container_width=True, config=plotly_download_config(f"perf_rel_poche_crypto_vs_{bench_name}")
 
         # Portefeuilles & métriques
         rf_annual = risk_free_rate_percent / 100.0
@@ -1115,7 +1133,7 @@ if st.button("🔎 Analyser"):
 
         # Graph Portefeuilles
         fig_ports = plot_portfolios_cum(port_returns, f"Performance cumulée des portefeuilles ({rebal_mode})")
-        st.plotly_chart(fig_ports, use_container_width=True)
+        st.plotly_chart(fig_ports, use_container_width=True, config=plotly_download_config("ptfs_perf_comparaison"))
 
         # ---------------- Export (préparer & stocker) --------------------------
         perf_pct = (df_graph.ffill().bfill()/df_graph.ffill().bfill().iloc[0]-1)*100
