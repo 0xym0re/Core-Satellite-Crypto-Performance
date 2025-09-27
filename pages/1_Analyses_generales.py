@@ -1078,7 +1078,7 @@ if st.button("🔎 Analyser"):
         st.plotly_chart(fig_perf, use_container_width=True, config=plotly_download_config("performances_assets_histo"))
         st.plotly_chart(fig_lines, use_container_width=True, config=plotly_download_config("performances_assets_graph"))
         bench_name = asset_names_map.get(benchmark_ticker, benchmark_ticker)
-        st.plotly_chart(fig_rel, use_container_width=True, config=plotly_download_config(f"perf_rel_poche_crypto_vs_{bench_name}")
+        st.plotly_chart(fig_rel, use_container_width=True, config=plotly_download_config(f"perf_rel_poche_crypto_vs_{bench_name}"))
 
         # Portefeuilles & métriques
         rf_annual = risk_free_rate_percent / 100.0
