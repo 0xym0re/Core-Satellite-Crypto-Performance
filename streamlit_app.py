@@ -19,7 +19,7 @@ col1, col2 = st.columns(2)
 with col1:
     if st.button("➡️ Ouvrir Analyses générales"):
         try:
-            st.switch_page("pages/1_Analyses_générales.py")
+            st.switch_page("pages/1_Analyses_generales.py")
         except Exception:
             pass
 with col2:
