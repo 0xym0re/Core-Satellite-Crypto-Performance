@@ -1,12 +1,12 @@
 asset_mapping = {
-    "MSCI World": "URTH",
-    "Nasdaq": "^IXIC",
-    "S&P 500": "^GSPC",
+    "MSCI World": "ACWI",
+    "Nasdaq": "QQQ",
+    "S&P 500": "SPY",
     "US 10Y Yield": "^TNX",
-    "Dollar Index": "DX-Y.NYB",
-    "Gold": "GC=F",
-    "iShares Bonds Agregate": "AGGG.L",
-    "Amundi PEA Immobilier Europe (PMEH)": "PMEH.PA",
+    "Dollar Index": "UUP",
+    "Gold": "IAU",
+    "iShares Core Global Aggregate Bond (Acc)": "AGAC.AS",
+    "iShares Global REITs": "VNQ",
 }
 crypto_static = {
     "Bitcoin (BTC$)": "BTC-USD",
