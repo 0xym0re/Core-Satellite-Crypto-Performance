@@ -178,14 +178,16 @@ for k in list(portfolio_allocations.keys()):
 # ----------------------------------------------------------------------------------------
 # Helpers data
 # ----------------------------------------------------------------------------------------
-@st.cache_data(ttl=3600, show_spinner=False)
 def download_prices(tickers, start, end):
-    if isinstance(tickers, str): tickers = [tickers]
+    if isinstance(tickers, str):
+        tickers = [tickers]
+
     data = yf.download(
         tickers, start=start, end=end + pd.Timedelta(days=1),
         interval="1d", auto_adjust=False, group_by="column",
         threads=True, progress=False
     )
+
     # MultiIndex -> Adj Close prioritaire
     if isinstance(data.columns, pd.MultiIndex):
         if "Adj Close" in data.columns.get_level_values(0):
@@ -202,11 +204,16 @@ def download_prices(tickers, start, end):
             df = data["Close"].to_frame(name=tickers[0])
         else:
             df = data.to_frame(name=tickers[0])
-    return df.sort_index()
+
+    # ✅ IMPORTANT : s'assurer que toutes les colonnes demandées existent
+    # (même si Yahoo ne renvoie pas ce ticker) -> évite les KeyError plus loin
     for t in tickers:
         if t not in df.columns:
             df[t] = pd.NA
+
+    df = df.sort_index()
     return df
+
 
 def is_crypto_ticker(t, crypto_set):
     return t in crypto_set
