@@ -9,7 +9,7 @@ st.markdown(
 
 # Liens vers les pages (fonctionne avec Streamlit récent). Fallback propre si indisponible.
 try:
-    st.page_link("pages/1_Analyses_générales.py", label="📊 Analyses générales")
+    st.page_link("pages/1_Analyses_generales.py", label="📊 Analyses générales")
     st.page_link("pages/2_Personnalisation_client.py", label="🎯 Personnalisation client")
 except Exception:
     st.info("Utilisez le menu latéral « Pages » pour naviguer.")
