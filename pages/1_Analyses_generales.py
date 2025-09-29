@@ -1077,10 +1077,16 @@ with c2:
 # ----------------------------------------------------------------------------------------
 st.markdown("**Liste des actifs à comparer**")
 compare_assets = [a for a in available_assets]
-preselect = ["Bitcoin (BTC$)","Ethereum (ETH$)","MSCI World","S&P 500","Gold","Amundi PEA Immobilier Europe (PMEH)"]
+available_assets = list(({**asset_mapping, **crypto_static, **us_equity_mapping}).keys())
+
+preselect = ["Bitcoin (BTC$)","Ethereum (ETH$)","MSCI World","S&P 500","Gold","iShares Core Global Aggregate Bond", "iShares Global REITs"]
 safe_default = [a for a in preselect if a in compare_assets]
 selected_comparisons = st.multiselect("📊 Actifs à comparer :", compare_assets, default=safe_default)
-compare_tickers = [full_asset_mapping[a] for a in selected_comparisons if a in full_asset_mapping]
+safe_default = [a for a in preselect if a in available_assets]
+selected_comparisons = st.multiselect("📊 Actifs à comparer :", available_assets, default=safe_default)
+compare_tickers = [ (asset_mapping.get(a) or crypto_static.get(a) or us_equity_mapping.get(a))
+                    for a in selected_comparisons ]
+compare_tickers = [t for t in compare_tickers if t] 
 
 def align_to_business_days(df):
     # prend la dernière quote de chaque jour ouvré puis ffill (jours fériés inclus)
