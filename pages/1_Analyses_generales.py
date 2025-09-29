@@ -30,8 +30,12 @@ from reportlab.platypus import Table, TableStyle, Paragraph, SimpleDocTemplate, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import PageBreak
 from PIL import Image as PILImage
-from pages.shared_assets import asset_mapping, crypto_static, us_equity_mapping
-
+import importlib
+from pages import shared_assets as _shared_assets
+importlib.reload(_shared_assets)  # force la prise en compte des derniers changements
+asset_mapping = _shared_assets.asset_mapping
+crypto_static = _shared_assets.crypto_static
+us_equity_mapping = _shared_assets.us_equity_mapping
 
 # ----------------------------------------------------------------------------------------
 # Utils
@@ -149,12 +153,27 @@ st.title("Comparaison de performances d'actifs")
 # ----------------------------------------------------------------------------------------
 # Portefeuilles de base
 # ----------------------------------------------------------------------------------------
-portfolio_allocations = {
-    "Portfolio 1": {"^GSPC": 0.60, "AGGG.L": 0.40},
-    "Portfolio 2": {"^GSPC": 0.57, "AGGG.L": 0.38, "GC=F": 0.05},
-}
+def _t(sym):
+    # helper: récupère le ticker actuel pour une étiquette d’actif
+    return asset_mapping.get(sym)
+
 def portfolio1_label(): return "Portefeuille 1 (60/40)"
 def portfolio2_label(): return "Portefeuille 2 (60/40 + 5% Or)"
+
+portfolio_allocations = {
+    "Portfolio 1": {
+        _t("S&P 500"): 0.60,
+        _t("iShares Core Global Aggregate Bond"): 0.40,
+    },
+    "Portfolio 2": {
+        _t("S&P 500"): 0.57,
+        _t("iShares Core Global Aggregate Bond"): 0.38,
+        _t("Gold"): 0.05,
+    },
+}
+# sécurité : enlève d’éventuels None si une clé a été renommée/supprimée
+for k in list(portfolio_allocations.keys()):
+    portfolio_allocations[k] = {t:w for t,w in portfolio_allocations[k].items() if t}
 
 # ----------------------------------------------------------------------------------------
 # Helpers data
