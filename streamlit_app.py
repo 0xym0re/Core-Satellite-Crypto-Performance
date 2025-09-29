@@ -14,17 +14,3 @@ try:
 except Exception:
     st.info("Utilisez le menu latéral « Pages » pour naviguer.")
 
-# Option: bouton pour basculer directement (si st.switch_page dispo)
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("➡️ Ouvrir Analyses générales"):
-        try:
-            st.switch_page("pages/1_Analyses_generales.py")
-        except Exception:
-            pass
-with col2:
-    if st.button("➡️ Ouvrir Personnalisation client"):
-        try:
-            st.switch_page("pages/2_Personnalisation_client.py")
-        except Exception:
-            pass
