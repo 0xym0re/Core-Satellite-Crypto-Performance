@@ -258,30 +258,73 @@ def portfolio_returns_buy_and_hold(prices, allocations):
     return nav.pct_change().dropna()
 
 def portfolio_returns_with_rebalancing(prices, allocations, freq="M"):
+    """
+    Rebalance aux frontières 'M' (mensuel) ou 'Q' (trimestriel) uniquement.
+    À l'intérieur de la période, les poids dérivent selon les performances.
+    Retourne une série de rendements (même horloge que `prices` après pct_change).
+    """
     alloc_norm, tickers = renormalize_weights_if_needed(prices, allocations)
-    if not tickers: return pd.Series(dtype=float)
+    if not tickers:
+        return pd.Series(dtype=float)
+
+    # Prix -> rendements périodiques (tu lui passes déjà une horloge weekly)
     P = prices[tickers].copy().ffill()
     R = P.pct_change().dropna(how="all")
-    keys = R.index.to_period("M" if freq=="M" else "Q")
-    parts = []
-    for _, g in R.groupby(keys):
-        cols = [c for c in g.columns if c in alloc_norm]
-        if not cols: continue
-        w = np.array([alloc_norm[c] for c in cols], dtype=float)
-        if w.sum() <= 0: continue
-        w = w / w.sum()
-        parts.append((g[cols] * w).sum(axis=1))
-    if not parts: return pd.Series(dtype=float)
-    return pd.concat(parts).sort_index()
+    if R.empty:
+        return pd.Series(dtype=float)
+
+    # Poids cibles (sur les colonnes finales utilisées)
+    target_w = np.array([alloc_norm[t] for t in tickers], dtype=float)
+    target_w = target_w / target_w.sum()
+
+    periods = R.index.to_period("M" if freq == "M" else "Q")
+
+    out_idx, out_ret = [], []
+    w = target_w.copy()          # poids courants (dérivent intra-période)
+    prev_period = None
+
+    for i, (dt, r_row) in enumerate(R.iterrows()):
+        prd = periods[i]
+
+        # Rebalance au début d'une nouvelle période
+        if (prev_period is None) or (prd != prev_period):
+            w = target_w.copy()
+            # Si un actif est NaN à cette date, on le neutralise puis on renormalise
+            mask = ~r_row.isna().values
+            if mask.any():
+                w = w * mask
+                w = w / w.sum()
+            else:
+                prev_period = prd
+                continue  # rien à faire si tous NaN (très improbable après ffill)
+
+        # Rendement du portefeuille pour cette date
+        r_vals = r_row.values
+        pr = float(np.nansum(w * r_vals))
+        out_idx.append(dt)
+        out_ret.append(pr)
+
+        # Dérive des poids (pas de rebalance intra-période)
+        growth = np.where(np.isnan(r_vals), 1.0, 1.0 + r_vals)
+        w = w * growth
+        s = w.sum()
+        if s > 0:
+            w = w / s
+
+        prev_period = prd
+
+    return pd.Series(out_ret, index=out_idx, dtype=float)
 
 def portfolio_returns(prices, allocations, rebal_mode):
     if rebal_mode.startswith("Buy"):
         return portfolio_returns_buy_and_hold(prices, allocations)
     elif rebal_mode.startswith("Monthly"):
         return portfolio_returns_with_rebalancing(prices, allocations, "M")
-    else:
+    elif rebal_mode.startswith("Quarterly"):
         return portfolio_returns_with_rebalancing(prices, allocations, "Q")
-
+    else:
+        # fallback explicite
+        return portfolio_returns_with_rebalancing(prices, allocations, "M")
 # ----------------------------------------------------------------------------------------
 # Risk metrics
 # ----------------------------------------------------------------------------------------
