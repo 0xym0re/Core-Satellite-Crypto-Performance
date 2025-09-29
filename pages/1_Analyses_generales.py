@@ -1114,7 +1114,7 @@ if st.button("🔎 Analyser"):
 
         # Data
         df_raw = download_prices(tickers_dl, start_date, end_date)
-        df, dpy_global = normalize_clock(df_raw, crypto_tickers_set, freq_mode)
+        df, dpy_global = normalize_clock(df_raw, crypto_tickers_set)
 
         traditional_tickers = [t for t in traditional_tickers_set if t in df.columns]
         if traditional_tickers:
