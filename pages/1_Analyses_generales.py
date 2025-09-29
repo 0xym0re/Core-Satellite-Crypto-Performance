@@ -267,6 +267,52 @@ def drawdown_stats(series):
     max_dd = dd.min() if len(dd) else np.nan
     return dd, max_dd
 
+
+def drawdown_info_from_returns(r: pd.Series):
+    """
+    Retourne un dict avec MDD et dates clés à partir d'une série de rendements périodiques r.
+    MDD = min(cum/peak - 1). Donne aussi pic->creux->recovery et la durée.
+    """
+    if r is None or len(r) == 0:
+        return {
+            "max_dd": np.nan, "peak_date": None, "trough_date": None,
+            "recovery_date": None, "mdd_length_days": None
+        }
+
+    cum = (1.0 + r).cumprod()
+    peak = cum.cummax()
+    dd = cum / peak - 1.0
+
+    # Date du creux (MDD)
+    if dd.isna().all():
+        return {
+            "max_dd": np.nan, "peak_date": None, "trough_date": None,
+            "recovery_date": None, "mdd_length_days": None
+        }
+    trough_date = dd.idxmin()
+    max_dd = float(dd.loc[trough_date])
+
+    # Pic précédent (peak) avant le creux
+    peak_before = cum.loc[:trough_date].idxmax()
+
+    # Recovery = date de retour au pic (dd == 0) après le creux
+    post = dd.loc[trough_date:]
+    recovery_date = post[post >= 0].first_valid_index()  # première date où dd >= 0 après creux
+
+    # Durée (jours calendaires) pic -> recovery (si recovery existe), sinon pic -> fin
+    if recovery_date is not None:
+        length = (recovery_date - peak_before).days
+    else:
+        length = (dd.index[-1] - peak_before).days
+
+    return {
+        "max_dd": max_dd,
+        "peak_date": pd.to_datetime(peak_before).date() if pd.notna(peak_before) else None,
+        "trough_date": pd.to_datetime(trough_date).date() if pd.notna(trough_date) else None,
+        "recovery_date": pd.to_datetime(recovery_date).date() if recovery_date is not None else None,
+        "mdd_length_days": int(length) if length is not None else None
+    }
+
 def compute_metrics_from_returns(r, dpy=252, rf_annual=0.0,
                                  want_sortino=True, want_calmar=True,
                                  want_var=False, want_cvar=False, var_alpha=0.95):
@@ -291,7 +337,10 @@ def compute_metrics_from_returns(r, dpy=252, rf_annual=0.0,
         sortino = (excess_mu/down_stdev_ann) if down_stdev_ann and down_stdev_ann != 0 else np.nan
 
     # Drawdown & Calmar
-    dd, max_dd = drawdown_stats(r)
+    info = drawdown_info_from_returns(r)
+    max_dd = info["max_dd"]
+    calmar = (cagr/abs(max_dd)) if want_calmar and (max_dd is not None) and (max_dd != 0) and pd.notna(max_dd) else np.nan
+
     calmar = (cagr/abs(max_dd)) if want_calmar and max_dd and max_dd != 0 else np.nan
 
     # VaR / CVaR (historiques) à la fréquence d'échantillonnage
@@ -309,6 +358,10 @@ def compute_metrics_from_returns(r, dpy=252, rf_annual=0.0,
         "Cumulative Return %": round(cum_ret*100, 2),
         "Volatility %": round(vol_ann*100, 2),
         "Max Drawdown %": round(max_dd*100, 2) if pd.notna(max_dd) else np.nan,
+        "MDD start (peak)": str(info["peak_date"]) if info["peak_date"] else "",
+        "MDD trough": str(info["trough_date"]) if info["trough_date"] else "",
+        "MDD recovery": str(info["recovery_date"]) if info["recovery_date"] else "—",
+        "MDD length (days)": info["mdd_length_days"] if info["mdd_length_days"] is not None else "",
         "Sharpe": round(sharpe, 2),
         "Sortino": round(sortino, 2) if pd.notna(sortino) else np.nan,
         "Calmar": round(calmar, 2) if pd.notna(calmar) else np.nan,
@@ -885,6 +938,12 @@ with st.sidebar:
                                    default=["Sharpe","Sortino","Calmar"])
     var_conf = st.slider("Confiance VaR/CVaR (daily)", 0.80, 0.995, 0.95, 0.005)
 
+    show_mdd_dates = st.checkbox(
+    "Afficher les dates du Max Drawdown",
+    value=False,
+    help="Ajoute les colonnes Peak/Trough/Recovery et la durée (jours) au tableau de métriques."
+)
+
     st.divider()
     st.subheader("Rapport PDF")
     company_name = st.text_input("Nom société", "Alphacap Digital Assets")
@@ -1106,7 +1165,11 @@ if st.button("🔎 Analyser"):
             metrics_dict[disp] = m
         metrics_df = pd.DataFrame(metrics_dict)
 
-        cols_order = ["Annualized Return %","Cumulative Return %","Volatility %","Max Drawdown %","Sharpe"]
+        cols_order = ["Annualized Return %","Cumulative Return %","Volatility %","Max Drawdown %",]
+        if show_mdd_dates:
+            cols_order += ["MDD start (peak)", "MDD trough", "MDD recovery", "MDD length (days)"]
+
+        cols_order += ["Sharpe"]
         if "Sortino" in risk_measures: cols_order.append("Sortino")
         if "Calmar" in risk_measures: cols_order.append("Calmar")
         if "VaR (daily)" in risk_measures: cols_order.append("VaR (daily)")
