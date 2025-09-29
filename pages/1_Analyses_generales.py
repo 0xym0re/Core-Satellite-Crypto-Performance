@@ -1076,12 +1076,11 @@ with c2:
 # Comparaison d'actifs
 # ----------------------------------------------------------------------------------------
 st.markdown("**Liste des actifs à comparer**")
-compare_assets = [a for a in available_assets]
+
+# 1) Construire la liste des actifs à partir des MAPPINGS RECHARGÉS
 available_assets = list(({**asset_mapping, **crypto_static, **us_equity_mapping}).keys())
 
 preselect = ["Bitcoin (BTC$)","Ethereum (ETH$)","MSCI World","S&P 500","Gold","iShares Core Global Aggregate Bond", "iShares Global REITs"]
-safe_default = [a for a in preselect if a in compare_assets]
-selected_comparisons = st.multiselect("📊 Actifs à comparer :", compare_assets, default=safe_default)
 safe_default = [a for a in preselect if a in available_assets]
 selected_comparisons = st.multiselect("📊 Actifs à comparer :", available_assets, default=safe_default)
 compare_tickers = [ (asset_mapping.get(a) or crypto_static.get(a) or us_equity_mapping.get(a))
