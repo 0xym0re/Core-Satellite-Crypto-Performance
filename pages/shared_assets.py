@@ -5,7 +5,7 @@ asset_mapping = {
     "US 10Y Yield": "^TNX",
     "Dollar Index": "UUP",
     "Gold": "IAU",
-    "iShares Core Global Aggregate Bond": "AGAC.AS",
+    "iShares Core Global Aggregate Bond": "AGGU.L",
     "iShares Global REITs": "VNQ",
 }
 crypto_static = {
