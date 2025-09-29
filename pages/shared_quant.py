@@ -24,11 +24,11 @@ def download_prices(tickers, start, end):
             df = data["Close"].to_frame(name=tickers[0])
         else:
             df = data.to_frame(name=tickers[0])
-    full_idx = pd.date_range(start=start, end=end, freq="D")
-    df = df.reindex(full_idx).sort_index()
+    
     for t in tickers:
         if t not in df.columns:
             df[t] = pd.NA
+    df = df.sort_index()
     return df
 
 def renormalize_weights_if_needed(prices_df, allocations):
