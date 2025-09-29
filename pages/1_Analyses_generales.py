@@ -1095,13 +1095,9 @@ def align_to_weekly(df, rule="W-FRI"):
     return df.resample(rule).last().ffill()
 
 
-def normalize_clock(df, crypto_set, mode):
-    if mode == "Daily":
-        return align_to_business_days(df), 252
-    elif mode == "Weekly":
-        return align_to_weekly(df), 52
-    else:  # fallback sécurité
-        return align_to_business_days(df), 252
+def normalize_clock(df, crypto_set, mode=None):
+    # tout en hebdo (vendredi)
+    return df.resample("W-FRI").last().ffill(), 52
 
 # ----------------------------------------------------------------------------------------
 # ANALYSE
