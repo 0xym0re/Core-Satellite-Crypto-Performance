@@ -936,7 +936,7 @@ def generate_docx_report(company_name, logo_bytes, charts_dict, metrics_df, comp
 # ----------------------------------------------------------------------------------------
 # UI : sidebar
 # ----------------------------------------------------------------------------------------
-wwith st.sidebar:
+with st.sidebar:
     st.header("Paramètres")
     risk_free_rate_percent = st.number_input("Taux sans risque annuel (%)", -5.0, 20.0, 0.0, 0.1)
     rebal_mode = st.selectbox("Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"])
