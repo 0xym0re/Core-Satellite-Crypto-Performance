@@ -202,8 +202,7 @@ def download_prices(tickers, start, end):
             df = data["Close"].to_frame(name=tickers[0])
         else:
             df = data.to_frame(name=tickers[0])
-    full_idx = pd.date_range(start=start, end=end, freq="D")
-    df = df.reindex(full_idx).sort_index()
+    return df.sort_index()
     for t in tickers:
         if t not in df.columns:
             df[t] = pd.NA
@@ -268,7 +267,7 @@ def portfolio_returns_with_rebalancing(prices, allocations, freq="M"):
     if not parts: return pd.Series(dtype=float)
     return pd.concat(parts).sort_index()
 
-def portfolio_daily_returns(prices, allocations, rebal_mode):
+def portfolio_returns(prices, allocations, rebal_mode):
     if rebal_mode.startswith("Buy"):
         return portfolio_returns_buy_and_hold(prices, allocations)
     elif rebal_mode.startswith("Monthly"):
@@ -332,45 +331,41 @@ def drawdown_info_from_returns(r: pd.Series):
         "mdd_length_days": int(length) if length is not None else None
     }
 
-def compute_metrics_from_returns(r, dpy=252, rf_annual=0.0,
+def compute_metrics_from_returns(r, dpy=52, rf_annual=0.0,
                                  want_sortino=True, want_calmar=True,
                                  want_var=False, want_cvar=False, var_alpha=0.95):
-    if r is None or len(r) == 0: return {}
+    r = pd.Series(r).dropna()
+    if r.empty: return {}
 
-    # Perf
     cum_ret = (1 + r).prod() - 1
-    cagr = (1 + cum_ret)**(dpy/len(r)) - 1
+    years = ((r.index[-1] - r.index[0]).days / 365.25) if len(r.index) >= 2 else (len(r)/dpy)
+    cagr = (1 + cum_ret)**(1/years) - 1 if years and years > 0 else np.nan
 
-    # Moyenne/vol par période -> annualisation 'classique'
-    mu_ann = r.mean() * dpy
-    vol_ann = r.std() * np.sqrt(dpy)
+    mu_ann  = r.mean() * dpy
+    vol_ann = r.std(ddof=1) * np.sqrt(dpy)
 
-    # Sharpe/Sortino
     excess_mu = mu_ann - rf_annual
     sharpe = excess_mu/vol_ann if vol_ann and vol_ann != 0 else np.nan
 
     sortino = np.nan
     if want_sortino:
-        downside = r.copy(); downside[downside > 0] = 0
-        down_stdev_ann = downside.std() * np.sqrt(dpy)
-        sortino = (excess_mu/down_stdev_ann) if down_stdev_ann and down_stdev_ann != 0 else np.nan
+        downside = np.minimum(r, 0.0)
+        semidev_ann = np.sqrt((downside**2).mean()) * np.sqrt(dpy)
+        sortino = (excess_mu/semidev_ann) if semidev_ann and semidev_ann != 0 else np.nan
 
-    # Drawdown & Calmar
     info = drawdown_info_from_returns(r)
     max_dd = info["max_dd"]
-    calmar = (cagr/abs(max_dd)) if want_calmar and (max_dd is not None) and (max_dd != 0) and pd.notna(max_dd) else np.nan
+    calmar = (cagr/abs(max_dd)) if (want_calmar and pd.notna(max_dd) and max_dd != 0) else np.nan
 
-    calmar = (cagr/abs(max_dd)) if want_calmar and max_dd and max_dd != 0 else np.nan
-
-    # VaR / CVaR (historiques) à la fréquence d'échantillonnage
     var_val = cvar_val = np.nan
     if want_var or want_cvar:
-        q = np.quantile(-r.dropna(), var_alpha) if len(r.dropna())>0 else np.nan
-        if want_var:  var_val = q
-        if want_cvar:
-            tail = -r.dropna()
-            tail = tail[tail >= q]
-            cvar_val = tail.mean() if len(tail) > 0 else q
+        base = -r.dropna()
+        if not base.empty:
+            q = np.quantile(base, var_alpha)
+            if want_var: var_val = q
+            if want_cvar:
+                tail = base[base >= q]
+                cvar_val = tail.mean() if len(tail) > 0 else q
 
     return {
         "Annualized Return %": round(cagr*100, 2),
@@ -381,11 +376,11 @@ def compute_metrics_from_returns(r, dpy=252, rf_annual=0.0,
         "MDD trough": str(info["trough_date"]) if info["trough_date"] else "",
         "MDD recovery": str(info["recovery_date"]) if info["recovery_date"] else "—",
         "MDD length (days)": info["mdd_length_days"] if info["mdd_length_days"] is not None else "",
-        "Sharpe": round(sharpe, 2),
+        "Sharpe": round(sharpe, 2) if pd.notna(sharpe) else np.nan,
         "Sortino": round(sortino, 2) if pd.notna(sortino) else np.nan,
         "Calmar": round(calmar, 2) if pd.notna(calmar) else np.nan,
-        "VaR (daily)": round(var_val*100, 2) if pd.notna(var_val) else np.nan,
-        "CVaR (daily)": round(cvar_val*100, 2) if pd.notna(cvar_val) else np.nan,
+        "VaR (weekly)": round(var_val*100, 2) if pd.notna(var_val) else np.nan,
+        "CVaR (weekly)": round(cvar_val*100, 2) if pd.notna(cvar_val) else np.nan,
     }
 
 # ----------------------------------------------------------------------------------------
@@ -772,7 +767,7 @@ def generate_pdf_report(company_name, logo_file, charts_dict, metrics_df, compos
     elements.append(PageBreak())
     elements.append(Paragraph("Glossaire des indicateurs de risque (*)", h2))
     for line in [
-        "<b>Volatilité*</b> : écart-type des rendements journaliers, annualisé (base 252).",
+        "<b>Volatilité*</b> : écart-type des rendements hebdomadaires, annualisé (base 52).",
         "<b>Max Drawdown*</b> : pire baisse (pic-creux) cumulée sur la période.",
         "<b>Sharpe*</b> : (Rendement annualisé − Taux sans risque) / Volatilité.",
         "<b>Sortino*</b> : variante du Sharpe ne pénalisant que la volatilité baissière.",
@@ -941,27 +936,24 @@ def generate_docx_report(company_name, logo_bytes, charts_dict, metrics_df, comp
 # ----------------------------------------------------------------------------------------
 # UI : sidebar
 # ----------------------------------------------------------------------------------------
-with st.sidebar:
+wwith st.sidebar:
     st.header("Paramètres")
     risk_free_rate_percent = st.number_input("Taux sans risque annuel (%)", -5.0, 20.0, 0.0, 0.1)
     rebal_mode = st.selectbox("Rebalancing", ["Buy & Hold (no rebalance)", "Monthly", "Quarterly"])
-    freq_mode = st.radio(
-    "Horloge de calcul (fréquence d'échantillonnage)",
-    ["Daily", "Weekly"],
-    index=0,
-    help="Daily = jours ouvrés (252) ; Hebdo = clôture vendredi (52)."
-)
 
-    risk_measures = st.multiselect("Mesures de risque à afficher",
-                                   ["Sharpe","Sortino","Calmar","VaR (daily)","CVaR (daily)"],
-                                   default=["Sharpe","Sortino","Calmar"])
-    var_conf = st.slider("Confiance VaR/CVaR (daily)", 0.80, 0.995, 0.95, 0.005)
+    st.caption("Horloge de calcul : **Weekly (W-FRI)** — base d’annualisation 52.")
+    risk_measures = st.multiselect(
+        "Mesures de risque à afficher",
+        ["Sharpe","Sortino","Calmar","VaR (weekly)","CVaR (weekly)"],
+        default=["Sharpe","Sortino","Calmar"]
+    )
+    var_conf = st.slider("Confiance VaR/CVaR (weekly)", 0.80, 0.995, 0.95, 0.005)
 
     show_mdd_dates = st.checkbox(
-    "Afficher les dates du Max Drawdown",
-    value=False,
-    help="Ajoute les colonnes Peak/Trough/Recovery et la durée (jours) au tableau de métriques."
-)
+        "Afficher les dates du Max Drawdown",
+        value=False,
+        help="Ajoute les colonnes Peak/Trough/Recovery et la durée (jours) au tableau de métriques."
+    )
 
     st.divider()
     st.subheader("Rapport PDF")
@@ -1095,8 +1087,8 @@ def align_to_weekly(df, rule="W-FRI"):
     return df.resample(rule).last().ffill()
 
 
-def normalize_clock(df, crypto_set, mode=None):
-    # tout en hebdo (vendredi)
+def normalize_clock(df, crypto_set):
+    # Tout en hebdo (vendredi), base annuelle = 52
     return df.resample("W-FRI").last().ffill(), 52
 
 # ----------------------------------------------------------------------------------------
@@ -1169,7 +1161,7 @@ if st.button("🔎 Analyser"):
             port_names_display["Portfolio 3"] = f"Portefeuille 3 (60/40 + {crypto_global_pct:.0f}% Crypto)"
 
         for key, alloc in portfolio_allocations.items():
-            r = portfolio_daily_returns(df, alloc, rebal_mode)
+            r = portfolio_returns(df, alloc, rebal_mode)
             port_returns[port_names_display.get(key, key)] = r
 
         def want(x): return x in risk_measures
@@ -1180,7 +1172,7 @@ if st.button("🔎 Analyser"):
             m = compute_metrics_from_returns(
                 r, dpy=dpy_global, rf_annual=rf_annual,
                 want_sortino=want("Sortino"), want_calmar=want("Calmar"),
-                want_var=want("VaR (daily)"), want_cvar=want("CVaR (daily)"), var_alpha=var_conf
+                want_var=want("VaR (weekly)"), want_cvar=want("CVaR (weekly)"), var_alpha=var_conf
             )
             metrics_dict[disp] = m
         metrics_df = pd.DataFrame(metrics_dict)
@@ -1192,8 +1184,8 @@ if st.button("🔎 Analyser"):
         cols_order += ["Sharpe"]
         if "Sortino" in risk_measures: cols_order.append("Sortino")
         if "Calmar" in risk_measures: cols_order.append("Calmar")
-        if "VaR (daily)" in risk_measures: cols_order.append("VaR (daily)")
-        if "CVaR (daily)" in risk_measures: cols_order.append("CVaR (daily)")
+        if "VaR (weekly)" in risk_measures: cols_order.append("VaR (weekly)")
+        if "CVaR (weekly)" in risk_measures: cols_order.append("CVaR (weekly)")
         metrics_df = metrics_df.reindex(index=cols_order)
 
         st.markdown("### Comparaison de portefeuilles")
